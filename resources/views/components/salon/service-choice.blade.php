@@ -82,19 +82,9 @@
     <span class="min-w-0 flex-1">
         <span class="block truncate text-sm font-medium text-ink">{{ $service->name }}</span>
         <span class="block text-xs text-ink-muted">
-            {{-- Duration first, but only when there is one, and the separator
-                 belongs to it rather than being unconditional — otherwise a
-                 service with no duration reads "· from ₱799" with a leading
-                 separator and nothing before it.
-
-                 The "from" prefix is gone. It was on every bookable row whatever
-                 the price, so a fixed service read "from ₱799", which reads as
-                 an estimate on a price that is not one. Where a price genuinely
-                 starts somewhere, the price column already says so in the shop's
-                 own words — "starts @ 120", "249/499". --}}
-            @if ($service->duration_label !== '')
-                {{ $service->duration_label }} &middot;
-            @endif
+            {{-- No duration, and so no separator either. The row reads the price
+                 and nothing else; `duration_minutes` stays in the Alpine payload
+                 above because the slot arithmetic still needs it. --}}
             {{ $bookable
                 ? App\Support\PriceFormatter::display($fromPrice)
                 : 'price on request' }}

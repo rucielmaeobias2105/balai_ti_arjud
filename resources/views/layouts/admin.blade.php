@@ -53,7 +53,18 @@
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     @stack('head')
 </head>
-<body class="min-h-full bg-linen">
+<body
+    {{--
+        The root `x-data` is the reason the sidebar's own `x-data` below is a
+        child rather than the root. `Alpine.start()` initialises `[x-data]`
+        elements and their subtrees, and does not walk from `<body>` itself, so
+        anything outside every `x-data` would never be initialised — silently,
+        with no error. Without a root here, that is anything a page puts in the
+        layout before the sidebar wrapper.
+    --}}
+    x-data
+    class="min-h-full bg-linen"
+>
     <div x-data="{ sidebar: false }" class="min-h-screen lg:flex">
         {{-- Mobile sidebar backdrop --}}
         <div
@@ -85,10 +96,21 @@
 
     @stack('modals')
 
-    {{-- The Terms & Conditions dialog. The admin's Terms screen is the editing
-         surface and stays a page, but "Preview" shows a customer what they will
-         actually see, and that is the modal. --}}
-    <x-terms.modal />
+    {{--
+        The Terms & Conditions dialog used to be mounted here, for the "Preview"
+        link on the admin's Terms screen. That link is gone — the page is the
+        editing surface, and the textarea beside it is the text being edited.
+
+        Nothing in the panel opens the dialog any more, so it was pure cost: the
+        component reads all three published policies and renders each one through
+        `TermsRenderer` on *every* admin page, not only the Terms screen. That is
+        three extra queries and a few hundred words of HTML on the dashboard, the
+        appointments list and the rest, for markup nothing on those pages can
+        reach.
+
+        The customer and auth layouts still mount it, and there the triggers are
+        real — the checkbox labels on registration and on the booking form.
+    --}}
 
     {{--
         The live work queue, with no widget of its own.

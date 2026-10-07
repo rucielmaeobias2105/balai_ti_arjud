@@ -86,9 +86,12 @@ class AdminRoleTest extends TestCase
     }
 
     /**
-     * No `calendar` in the list of screens: it went with the Calendar & Blocked
-     * Dates feature, and `CalendarRemovalTest` asserts the route is actually gone
-     * rather than merely unreached by this loop.
+     * Every screen the panel still has.
+     *
+     * Calendar is the newest of them, guarded by `admin.calendar.manage`;
+     * `BlockedSlotsTest` asserts what it does and `SalonSettingsRemovalTest` covers
+     * the recurring schedule that sits behind it. This loop only proves each screen
+     * is reachable.
      */
     public function test_an_admin_reaches_every_admin_screen(): void
     {
@@ -201,17 +204,26 @@ public function test_the_admin_role_can_delete_a_customer_record_and_nothing_els
 
         $nav = $matches[1];
 
-        // Calendar is absent: its nav item went with the feature. Messages is absent
-        // too: it was here for the sidebar badge, which was the only place the
-        // panel surfaced unread contact enquiries once the topbar bell went.
-        // Both the row and the badge are gone, so the screen is reachable by URL
-        // and advertised nowhere — `test_the_sidebar_offers_no_link_that_would_403`
-        // is what stops that from turning into a dead end.
-        foreach (['Dashboard', 'Appointments', 'Services', 'Categories', 'Technicians', 'Promo', 'Inventory', 'Registered Users', 'Terms &amp; Conditions', 'Reports'] as $label) {
+        // Calendar is here. Salon Settings is not: the recurring schedule is
+        // configuration in `salon_settings` rather than a record, and it has no
+        // admin screen — see `SalonSettingsRemovalTest`, which also covers the
+        // Calendar view's link to it having been a dead one.
+        //
+        // Messages is still absent: it was here for the sidebar badge, which was
+        // the only place the panel surfaced unread contact enquiries once the
+        // topbar bell went. Both the row and the badge are gone, so the screen is
+        // reachable by URL and advertised nowhere —
+        // `test_the_sidebar_offers_no_link_that_would_403` is what stops that
+        // from turning into a dead end.
+        foreach ([
+            'Dashboard', 'Appointments', 'Services', 'Categories', 'Technicians', 'Promo',
+            'Inventory', 'Registered Users', 'Terms &amp; Conditions', 'Reports', 'Calendar',
+        ] as $label) {
             $this->assertStringContainsString($label, $nav);
         }
 
-        $this->assertStringNotContainsString('Calendar', $nav);
+        $this->assertStringNotContainsString('Salon Settings', $nav);
+        $this->assertStringNotContainsString('/admin/settings', $nav);
         $this->assertStringNotContainsString('Messages', $nav, 'Messages is off the admin nav.');
 
         // The Low-Stock Tags screen was dropped from the nav; the stock warning

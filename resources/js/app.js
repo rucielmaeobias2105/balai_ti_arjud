@@ -728,12 +728,43 @@ document.addEventListener('alpine:init', () => {
     Alpine.data('adminTable', (config = {}) => ({
         search: config.search || '',
         perPage: Number(config.perPage) || 10,
-        perPageOptions: [10, 15, 25, 50, 100],
+        // Held apart from `perPage` for the option list alone: a screen that
+        // starts at a size the standard list does not have should still be able
+        // to come back to it after the admin has tried another one.
+        initialPerPage: Number(config.perPage) || 10,
+        standardPerPageOptions: [10, 15, 25, 50, 100],
         page: 1,
         haystacks: [],
         keep: [],
         onPage: [],
         total: 0,
+
+        /**
+         * What the page-size select offers — the standard list plus the sizes
+         * this screen has actually been asked for.
+         *
+         * `x-ui.admin-table` takes a `perPage` prop, and the Reports screen
+         * passes 12 (one row per month). Alpine's `<select>` is populated from
+         * this array, and a select whose value matches none of its options
+         * displays *nothing* while the table underneath keeps paging at the
+         * real size — an entries-per-page control that looks dead on arrival
+         * and silently disagrees with the list below it.
+         *
+         * Deriving the list rather than widening the shared one is the point:
+         * any screen can name its own page size and the control stays honest
+         * without this list and that prop having to be kept in step by hand.
+         * The live value is included as well as the initial one so the select
+         * can never end up blank, however `perPage` came to be what it is.
+         * Sorted so the option order does not depend on where a size came from,
+         * and de-duplicated so a screen asking for 25 does not get it twice.
+         */
+        get perPageOptions() {
+            const options = new Set(this.standardPerPageOptions);
+            options.add(Number(this.initialPerPage) || 10);
+            options.add(Number(this.perPage) || 10);
+
+            return [...options].sort((a, b) => a - b);
+        },
 
         get pages() {
             return Math.max(1, Math.ceil(this.total / this.perPage));
@@ -842,34 +873,63 @@ document.addEventListener('alpine:init', () => {
             return page === this.page;
         },
 
+        /**
+         * Move to another page — and re-slice the window.
+         *
+         * The `pageSlice()` call is the whole point of this method. It used to set
+         * `this.page` and stop there, so every getter that reads `page` (the pager
+         * window, `hasPages`, the current-page highlight) moved while `onPage` —
+         * the array the rows actually ask `isShown()` about — was left describing
+         * the previous page. Pressing "2" therefore restyled the pager and changed
+         * nothing on screen.
+         *
+         * That is also what made the entries-per-page select look broken. The two
+         * controls are the same mechanism seen from two ends: an admin who picked
+         * 25 rows per page, clicked through to page 2, saw no change, and concluded
+         * the page size had not taken. Every other caller (`$watch` on `perPage`,
+         * `$watch` on `search`, `filter()`) already re-sliced; this one did not.
+         *
+         * Clamping first matters: at the last page a narrower `perPage` can leave
+         * `page` past the end, and slicing that page would render an empty table.
+         */
         go(page) {
             this.page = Math.min(Math.max(1, page), this.pages);
+            this.pageSlice();
         },
     }));
 
     /**
-     * One appointment row's status dropdown on the admin list.
+     * One appointment row's live state: its status dropdown and its row actions.
      *
      * Markup contract:
-     *   <div x-data="appointmentStatus({ endpoint, current })">
-     *       <select @change="update($event.target.value, $event.target)">
+     *   <tr x-data="appointmentStatus({ id, endpoint, current, label, badge,
+     *                                  locked, choices, canArchive, canDelete })"
+     *       x-on:admin-appointment-row.window="if ($event.detail.id === id) apply($event.detail)">
+     *       <select x-ref="select" @change="update($event.target.value, $event.target)">
+     *       <button x-show="canArchive">…</button>
      *
      * The select still sits inside a real PATCH form, so the row works with
      * JavaScript switched off; this component only intercepts `change` to get
      * a refused transition reported in place instead of as a redirect back to
      * a page full of validation errors.
      *
-     * A successful change reloads rather than patching the row in place, and
-     * that is deliberate. Which options a row offers depends on its current
-     * status, the status tabs carry per-status counts, and the sidebar carries
-     * a pending badge — all three would be stale after a surgical update.
-     * Re-deriving them in JavaScript would mean a second copy of the
-     * transition rules that already live on the server. The controller flashes
-     * the confirmation toast into the session, so it survives the reload.
+     * It lives on the row rather than on the status cell because the two halves
+     * have to agree: Archive and Delete are rendered from the same status as the
+     * dropdown, and the moment an admin completes a booking the dropdown greys
+     * out and those two buttons appear. A scope per cell would leave the pair to
+     * be kept in step by hand; a scope per row is the only place they are the
+     * same fact.
      */
     Alpine.data('appointmentStatus', (config = {}) => ({
+        id: Number(config.id) || 0,
         endpoint: config.endpoint || '',
         current: config.current || '',
+        label: config.label || '',
+        badge: config.badge || '',
+        locked: Boolean(config.locked),
+        choices: Array.isArray(config.choices) ? config.choices : [],
+        canArchive: Boolean(config.canArchive),
+        canDelete: Boolean(config.canDelete),
         select: null,
         busy: false,
 
@@ -918,18 +978,252 @@ document.addEventListener('alpine:init', () => {
                 return;
             }
 
-            window.location.reload();
+            const payload = await response.json().catch(() => ({}));
+
+            /*
+             * Repaint the row from the server's answer rather than reloading.
+             *
+             * A full page reload used to be the end of a successful save, and it
+             * is why completing a booking did not put Archive and Delete on the
+             * row until the page came back: the buttons are rendered from the
+             * status, so they only exist in a response built after it changed.
+             * A reload is a way of getting that response, at the cost of the page
+             * the admin was reading — the filters, the page they were on, and the
+             * row they were looking at all thrown away to move two buttons.
+             *
+             * The save now answers with the row's new state, so the same result
+             * costs one repaint. The toast is raised from this payload for the
+             * same reason the controller stopped flashing it: nothing reloads to
+             * render it, and a flash left in the session would surface on whatever
+             * page the admin happened to open next.
+             */
+            this.apply(payload.row, true);
+
+            if (payload.message) {
+                window.btaToast?.show(payload.type || 'success', payload.message);
+            }
+
+            // The tab counts are page furniture rather than row furniture, so the
+            // page hands them on rather than this component writing into markup it
+            // does not own.
+            if (payload.counts) {
+                window.dispatchEvent(
+                    new CustomEvent('admin-appointment-counts', { detail: payload.counts }),
+                );
+            }
+        },
+
+        /**
+         * Put the row back the way the server has just described it.
+         *
+         * Two callers, and it has to be safe to run twice: this tab's own save
+         * answers with the new state, and the poller answers with the same state
+         * a moment later. Applying it a second time costs a repaint and changes
+         * nothing.
+         *
+         * Every field is taken from the payload rather than worked out here —
+         * particularly the menu, which is the server's own list rebuilt into the
+         * select rather than filtered client-side. That is what keeps
+         * `AppointmentStatus::MENUS` the only copy of the transition rules.
+         *
+         * `endSave` is the one thing not taken from the payload, because a poll
+         * has no save to end. It is cleared before the repaint rather than after,
+         * since the repaint reads it: a save that has just landed must not leave
+         * its own dropdown greyed out. Leaving it alone the other way round is
+         * deliberate — a poll arriving mid-save must not un-disable the control,
+         * or a second change could be posted behind the first.
+         */
+        apply(state, endSave = false) {
+            if (!state) return;
+
+            if (state.status) this.current = state.status;
+            if (state.label) this.label = state.label;
+            if (state.badge) this.badge = state.badge;
+            if (Array.isArray(state.choices)) this.choices = state.choices;
+
+            this.locked = state.locked ?? this.locked;
+            this.canArchive = Boolean(state.can_archive ?? state.canArchive);
+            this.canDelete = Boolean(state.can_delete ?? state.canDelete);
+
+            if (endSave) this.busy = false;
+
+            this.repaint();
+        },
+
+        /**
+         * Push the state onto the elements that show it.
+         *
+         * The options are rebuilt rather than filtered in place: a completed
+         * row's menu is empty, and a select still offering "Start / In Progress"
+         * would be offering a transition the route has already decided to refuse.
+         */
+        repaint() {
+            const select = this.$refs.select ?? this.select;
+
+            if (!select) return;
+
+            select.textContent = '';
+
+            this.choices.forEach((choice) => {
+                const option = document.createElement('option');
+
+                option.value = choice.value;
+                option.textContent = choice.label;
+
+                // The current status is the first option and is not selectable,
+                // exactly as Blade renders it: it is where the row is, not a move.
+                if (!choice.selectable) {
+                    option.selected = true;
+                    option.disabled = true;
+                }
+
+                select.appendChild(option);
+            });
+
+            select.value = this.current;
+
+            // Left disabled while this row's own save is in flight, so a second
+            // change cannot be posted behind the first.
+            select.disabled = this.locked || this.busy;
+
+            // The tint belongs to the status and the status was just decided by
+            // the server. Written wholesale rather than toggled, so the previous
+            // status's tint cannot survive the change.
+            select.className = [
+                'status-select',
+                `status-select-${this.badge}`,
+                ...(this.locked ? ['status-select-locked'] : []),
+            ].join(' ');
         },
 
         reset(message) {
             this.busy = false;
 
             if (this.select) {
-                this.select.disabled = false;
+                // Back to what this status says about the control, not simply
+                // enabled: a completed row's dropdown is disabled *because* it is
+                // completed, and un-disabling it on a refused save would offer
+                // the very control that cannot be used.
+                this.select.disabled = this.locked;
                 this.select.value = this.current;
             }
 
             window.btaToast?.show('error', message);
+        },
+    }));
+
+    /**
+     * The working list's poller: the rows' current state, on a timer.
+     *
+     * Markup contract:
+     *   <div x-data="appointmentRows({ endpoint, counts })"
+     *        x-on:admin-appointment-counts.window="counts = $event.detail">
+     *       <tr data-appointment-row="{{ $id }}" x-data="appointmentStatus(…)">
+     *
+     * The same arrangement as `notificationBell` and `adminLiveNotifications` —
+     * a `setInterval` tick, a poll on tab focus, a `busy` flag so two ticks
+     * cannot overlap, and a `destroy()` that takes the listener back off — for
+     * the same reason: there is no WebSocket server here, and a `fetch` every
+     * few seconds is the whole of the real-time behaviour.
+     *
+     * What it is for is the half of "live" the row's own save cannot cover. An
+     * admin completing a booking gets Archive and Delete from their own write; an
+     * admin looking at a list somebody else is working on does not, and without
+     * this tick they would be looking at rows that no longer exist in that form
+     * until they refreshed. The ids come from the DOM rather than from a second
+     * copy of the page's query, so the poller can only ever be asked about rows
+     * that are actually on screen.
+     */
+    Alpine.data('appointmentRows', (config = {}) => ({
+        endpoint: config.endpoint || '',
+        /**
+         * Bookings per status, for the tabs.
+         *
+         * Named to say what it counts. The layout's polling component has a
+         * `pending` key too, and that one is about unseen bookings — a different
+         * number that happens to share a name with a status.
+         */
+        statusCounts: config.statusCounts || {},
+        timer: null,
+        busy: false,
+        onVisible: null,
+
+        /** How often to ask. Long enough not to hammer, short enough to feel live. */
+        interval: 15000,
+
+        init() {
+            if (!this.endpoint) return;
+
+            this.timer = setInterval(() => this.poll(), this.interval);
+
+            // Same reasoning as the bell's: a hidden tab is not being looked at,
+            // and a browser throttles background timers but not to nothing.
+            this.onVisible = () => {
+                if (!document.hidden) this.poll();
+            };
+
+            document.addEventListener('visibilitychange', this.onVisible);
+        },
+
+        destroy() {
+            if (this.timer) clearInterval(this.timer);
+
+            if (this.onVisible) {
+                document.removeEventListener('visibilitychange', this.onVisible);
+                this.onVisible = null;
+            }
+        },
+
+        async poll() {
+            if (!this.endpoint || this.busy) return;
+
+            const ids = Array.from(this.$root.querySelectorAll('[data-appointment-row]')).map(
+                (row) => row.dataset.appointmentRow,
+            );
+
+            if (ids.length === 0) return;
+
+            this.busy = true;
+
+            try {
+                const url = new URL(this.endpoint, window.location.origin);
+
+                ids.forEach((id) => url.searchParams.append('ids[]', id));
+
+                const response = await fetch(url, {
+                    headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                });
+
+                if (!response.ok) return;
+
+                this.apply(await response.json().catch(() => ({})));
+            } catch {
+                // A failed poll changes nothing.
+            } finally {
+                this.busy = false;
+            }
+        },
+
+        /**
+         * Hand every row's answer to the row it belongs to.
+         *
+         * Broadcast on the window rather than dispatched from this element,
+         * because the rows are its descendants and a dispatched event travels
+         * upward. Each row listens for its own id and ignores the rest — fifteen
+         * rows each comparing one number is cheaper than a shared store, and it
+         * means a row can be repainted by its own save or by a poll without
+         * either knowing the other exists.
+         */
+        apply(payload) {
+            if (payload?.counts) this.statusCounts = payload.counts;
+
+            Object.entries(payload?.rows ?? {}).forEach(([id, state]) => {
+                window.dispatchEvent(
+                    new CustomEvent('admin-appointment-row', {
+                        detail: { ...state, id: Number(id) },
+                    }),
+                );
+            });
         },
     }));
 
@@ -1545,7 +1839,7 @@ document.addEventListener('alpine:init', () => {
         timer: null,
         busy: false,
 
-        /**
+        /*
          * A read-all is on the wire.
          *
          * Not a count of requests: a flag that says "a poll landing now would be
@@ -1556,6 +1850,19 @@ document.addEventListener('alpine:init', () => {
         clearing: false,
 
         unsubscribe: null,
+
+        /**
+         * Kept so `destroy()` can take it back off.
+         *
+         * The listener is on `document`, not on the element, so it outlives the
+         * Alpine scope that added it. `clearInterval` alone therefore stops the
+         * ticking but not the catch-up: every visibilitychange would keep calling
+         * `poll()` on a scope that no longer exists, and each of those is a real
+         * request. Harmless while every page load replaces the document — which is
+         * why it was never noticed — and a slow request leak the moment the scope
+         * is torn down and rebuilt in place.
+         */
+        onVisible: null,
 
         /** How often to ask. Long enough not to hammer, short enough to feel live. */
         interval: 15000,
@@ -1581,13 +1888,21 @@ document.addEventListener('alpine:init', () => {
             // A hidden tab is not being looked at, and a browser already throttles
             // background timers — but not to nothing, and there is no reason to
             // spend a request per minute on a tab in the background.
-            document.addEventListener('visibilitychange', () => {
+            this.onVisible = () => {
                 if (!document.hidden) this.poll();
-            });
+            };
+
+            document.addEventListener('visibilitychange', this.onVisible);
         },
 
         destroy() {
             if (this.timer) clearInterval(this.timer);
+
+            if (this.onVisible) {
+                document.removeEventListener('visibilitychange', this.onVisible);
+                this.onVisible = null;
+            }
+
             this.unsubscribe?.();
         },
 
@@ -1769,6 +2084,16 @@ document.addEventListener('alpine:init', () => {
 
         interval: 15000,
 
+        /*
+         * Kept so `destroy()` can take it back off.
+         *
+         * Same reasoning as the customer bell's: the listener is on `document`, so
+         * it outlives the scope that registered it, and `clearInterval` stops the
+         * tick without stopping the catch-up poll it triggers on every tab switch
+         * back. See `notificationBell.onVisible`.
+         */
+        onVisible: null,
+
         init() {
             // Server truth first, so the title and the badges agree before the
             // first poll rather than after it. Seeded from the two numbers the
@@ -1780,13 +2105,20 @@ document.addEventListener('alpine:init', () => {
 
             this.timer = setInterval(() => this.poll(), this.interval);
 
-            document.addEventListener('visibilitychange', () => {
+            this.onVisible = () => {
                 if (!document.hidden) this.poll();
-            });
+            };
+
+            document.addEventListener('visibilitychange', this.onVisible);
         },
 
         destroy() {
             if (this.timer) clearInterval(this.timer);
+
+            if (this.onVisible) {
+                document.removeEventListener('visibilitychange', this.onVisible);
+                this.onVisible = null;
+            }
         },
 
         /**
@@ -2054,6 +2386,20 @@ document.addEventListener('alpine:init', () => {
 
     Alpine.data('confirmDialog', (config = {}) => ({
         open: false,
+        /*
+         * The configured action, kept verbatim.
+         *
+         * `{id}` has to be resolved into a real URL before the form submits, and
+         * that resolution must not be written back over the template. `String
+         * .replace()` consumes what it matches, so a template that is resolved in
+         * place still holds the first row's id on the next open — the second row's
+         * "Yes" then posts the first row's URL. On Services that was a DELETE for
+         * a service already removed, and route model binding answering 404 for a
+         * soft-deleted row. Every open therefore starts from this copy, so the
+         * dialog is correct for the second row as well as the first, and stays
+         * correct whether the admin answered Yes or No to the row before.
+         */
+        template: config.action || '',
         action: config.action || '',
         count: 0,
         ids: [],
@@ -2090,6 +2436,18 @@ document.addEventListener('alpine:init', () => {
 
             if (detail.action) {
                 this.action = detail.action;
+            } else {
+                /*
+                 * Back to the configured action, not whatever the last row left.
+                 *
+                 * `action` is reactive precisely so the form's `x-bind:action`
+                 * picks the new URL up, which also makes it the *resolved* URL from
+                 * the previous open. Starting from it is what had every row after
+                 * the first posting the first row's endpoint — a DELETE for a
+                 * service that was already soft-deleted, so route model binding
+                 * answered 404 instead of deleting anything.
+                 */
+                this.action = this.template;
             }
 
             /*
@@ -2103,9 +2461,7 @@ document.addEventListener('alpine:init', () => {
              * (`/admin/appointments/7/archive`) and the placeholder is resolved
              * here, which keeps the "one real form" property: still no form per row.
              */
-            if (detail.id) {
-                this.action = this.action.replace('{id}', detail.id);
-            }
+            this.action = this.action.replace('{id}', detail.id ?? '{id}');
 
             // A caller that names a single row rather than a ticked set passes an
             // id and no count. Defaulting to zero there would render "Delete 0
@@ -2333,13 +2689,43 @@ document.addEventListener('alpine:init', () => {
      * opening empty.
      *
      * Markup contract:
-     *   <div x-data="appointmentViewer(rows, openId)">
+     *   <div x-data="appointmentViewer(rows, openId, bookAgainUrlTemplate)">
      *       <x-ui.dialog …>  <button x-on:click="$dispatch('view-appointment', {id})">
+     *
+     * `bookAgainUrlTemplate` is a URL with `__ID__` where the appointment id goes.
+     * Optional, because the admin Appointments list uses this same component for
+     * the same dialog and has no Book Again — an admin repeating a customer's
+     * booking is not a thing the panel offers. Null there, so `bookAgainUrl` is
+     * null and the customer-side button stays hidden rather than rendering a link
+     * to a route the admin cannot use.
      */
-    Alpine.data('appointmentViewer', (rows = {}, openId = null) => ({
+    Alpine.data('appointmentViewer', (rows = {}, openId = null, bookAgainUrlTemplate = null) => ({
         rows: rows || {},
         open: false,
         detail: null,
+        bookAgainUrlTemplate: bookAgainUrlTemplate,
+
+        /**
+         * The Book Again link for whatever the dialog is showing, or null.
+         *
+         * Three things have to line up, and each is checked here rather than in the
+         * markup: the caller supplied a template at all, the dialog is open on a
+         * row, and that row is Completed. The status is read from the payload
+         * rather than re-derived, so the button and the row's own icon in the
+         * Actions column are reading the same value and cannot disagree about which
+         * visits are repeatable.
+         */
+        get bookAgainUrl() {
+            if (! this.bookAgainUrlTemplate || ! this.detail) {
+                return null;
+            }
+
+            if (this.detail.status !== 'completed') {
+                return null;
+            }
+
+            return this.bookAgainUrlTemplate.replace('__ID__', this.detail.id);
+        },
 
         init() {
             if (openId) {

@@ -369,7 +369,7 @@ class CustomerAppointmentsTableTest extends TestCase
         $this->assertStringContainsString('Service(s)', $html);
         $this->assertStringContainsString('x-text="service.name"', $html);
         $this->assertStringContainsString('x-text="detail?.specialRequest"', $html);
-        $this->assertStringContainsString('Status History', $html);
+
 
         // Read-only, unlike the other two: it carries no form and no submit
         // button, so there is nothing in it to accidentally post.

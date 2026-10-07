@@ -81,7 +81,8 @@ if errorlevel 1 (
     echo       ERROR: migrate --seed failed.
     exit /b 1
 )
-php artisan storage:link >nul 2>&1
+REM No `storage:link` here, and none needed: uploads are written directly into
+REM public/storage, which is the directory the server serves. See README.
 echo       Done.
 
 REM ------------------------------------------------------------

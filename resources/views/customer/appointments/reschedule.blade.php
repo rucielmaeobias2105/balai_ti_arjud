@@ -25,7 +25,7 @@
 
         {{-- Current date/time — read-only --}}
         <div class="bta-card mb-6 border-l-4 border-l-gold p-5">
-            <p class="text-xs font-semibold uppercase tracking-wider text-ink-muted">Current Date &amp; Time (read-only)</p>
+            <p class="text-xs font-semibold uppercase tracking-wider text-ink-muted">Current Date & Time (read-only)</p>
             <p class="mt-1.5 font-display text-xl font-bold text-primary">{{ $appointment->date_time_label }}</p>
             <p class="mt-0.5 text-sm text-ink-muted">{{ $appointment->service_names }} &middot; Ref {{ $appointment->reference_number }}</p>
         </div>
@@ -56,7 +56,7 @@
 
             <script type="application/json" id="bta-reschedule-config">{!! json_encode($rescheduleConfig, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) !!}</script>
 
-            <x-ui.card title="New Date &amp; Time">
+            <x-ui.card title="New Date & Time">
                 <div class="grid gap-4 sm:grid-cols-2">
                     <x-ui.form.input
                         name="preferred_date"

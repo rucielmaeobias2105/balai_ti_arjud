@@ -145,11 +145,11 @@
                         <x-ui.icon-count-badge for="unread" />
                     </a>
 
-                    {{-- `x-on:` rather than the `@click` shorthand: Blade compiles
-                         a handful of directives (`@class`, `@checked`, `@disabled`,
-                         …) and leaves every other `@word` as literal text, so
-                         `@click`/`@click.outside` rendered as inert attributes and
-                         this menu never opened. --}}
+                    {{-- `x-on:` rather than the `@click` shorthand. Both are valid — Alpine
+                         registers `@` as a prefix for `x-on:` — so this is the
+                         spelled-out form used everywhere in this file, chosen so
+                         that a reader (and a grep) finds one spelling of the same
+                         directive on the page rather than two. --}}
                     <div class="relative hidden sm:block" x-data="dropdown" x-on:click.outside="close()">
                         <button type="button" x-on:click="toggle()" class="flex items-center gap-2 rounded-pill border border-primary/15 py-1 pl-1 pr-3 transition hover:border-gold hover:bg-linen/60" aria-haspopup="true" :aria-expanded="open">
                             @if (auth()->user()->profile_photo_path)

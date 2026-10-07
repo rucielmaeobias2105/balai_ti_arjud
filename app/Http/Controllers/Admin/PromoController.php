@@ -132,6 +132,34 @@ class PromoController extends Controller
 
     /**
      * Push the promo to customers as a notification.
+     *
+     * THE REQUEST HAS A CLOCK, AND THE LIST HAS NO TOP
+     *
+     * This runs inside the request: no queue, and InfinityFree has no worker to
+     * run one if there were. Each recipient costs one SMTP conversation on top
+     * of one row written, and `MAIL_TIMEOUT` bounds a *failing* conversation at
+     * ten seconds — so a mail server that accepts the connection and then goes
+     * quiet costs ten seconds per customer until the list ends or the host's
+     * PHP execution limit does. Fifty customers is five hundred seconds: a 502
+     * for the admin, and a promo half-announced.
+     *
+     * The half-announced part is what makes a time limit necessary rather than
+     * merely nice. `notified` is written after the loop, so a request killed
+     * mid-way leaves the button pressable again, and pressing it again sends a
+     * second copy to every customer who already got the first one.
+     *
+     * So the two halves of the notification are decided per recipient: the
+     * in-app row is written for everybody, and the email is attempted only
+     * while the budget lasts. `PromoAnnouncementNotification::via()` is what
+     * turns `$withMail` off. Past the deadline the loop still runs — it is now
+     * just one cheap INSERT each — so the flag, the count and the message below
+     * all describe what actually happened instead of what was hoped for.
+     *
+     * The budget is a config value rather than a constant so a host with a
+     * generous limit can raise it, and so the exhausted path can be tested
+     * without waiting for it.
+     *
+     * @see config/mail.php for the budget and its default.
      */
     public function announce(Request $request, Promo $promo): RedirectResponse
     {
@@ -148,13 +176,25 @@ class PromoController extends Controller
             default => User::query()->where('is_active', true)->get(),
         };
 
+        $deadline = microtime(true) + (int) config('mail.promo_announce_budget', 15);
+        $emailed = 0;
+
         foreach ($users as $user) {
-            $this->notifyQuietly($user, new PromoAnnouncementNotification($promo), 'promo announcement');
+            $withMail = microtime(true) < $deadline;
+            $emailed += $withMail ? 1 : 0;
+
+            $this->notifyQuietly($user, new PromoAnnouncementNotification($promo, $withMail), 'promo announcement');
         }
 
         $promo->forceFill(['notified' => true])->save();
 
-        return back()->with('status', "Promo announced to {$users->count()} customer(s).");
+        $status = "Promo announced to {$users->count()} customer(s).";
+
+        if ($emailed < $users->count()) {
+            $status .= ' Emailing stopped at the time limit — every customer still received the announcement in their account.';
+        }
+
+        return back()->with('status', $status);
     }
 
     /**

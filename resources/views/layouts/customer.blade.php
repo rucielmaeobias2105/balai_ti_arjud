@@ -55,7 +55,17 @@
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     @stack('head')
 </head>
-<body class="flex min-h-full flex-col bg-linen">
+<body
+    {{--
+        The same reason the auth layout has one: `Alpine.start()` initialises
+        `[x-data]` elements and their subtrees, and never walks from `<body>` on
+        its own. A directive sitting outside every `x-data` on the page is dead
+        code — no error, just an attribute that does nothing — so the root goes
+        here rather than depending on each page to remember its own.
+    --}}
+    x-data
+    class="flex min-h-full flex-col bg-linen"
+>
     <a href="#main" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-primary focus:px-4 focus:py-2 focus:text-cream">
         Skip to content
     </a>

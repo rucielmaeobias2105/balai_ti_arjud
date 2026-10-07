@@ -122,12 +122,19 @@ class ServiceCategory extends Model
             ?? (string) config('salon.default_category_image', 'images/hero.jpg');
     }
 
-    /** The absolute URL of the photo uploaded against this category, if any. */
+    /**
+     * The absolute URL of the photo uploaded against this category, if any.
+     *
+     * `url()` and not `asset()`, for the reason set out on
+     * `User::profile_photo_url`: `asset()` builds from `APP_URL`, so a deployed
+     * site whose `APP_URL` still says `localhost` renders every category photo
+     * as a request to the wrong origin.
+     */
     public function getPhotoUrlAttribute(): ?string
     {
         $path = $this->uploadedPhoto();
 
-        return $path ? asset('storage/'.$path) : null;
+        return $path ? url('storage/'.$path) : null;
     }
 
     /**

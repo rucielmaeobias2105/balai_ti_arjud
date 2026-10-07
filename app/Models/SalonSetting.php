@@ -8,8 +8,27 @@ use Illuminate\Support\Carbon;
 /**
  * Single-row operating configuration for the salon.
  *
- * Operating hours drive customer-side booking validation; blocked dates live
- * in their own table because admins maintain many of them.
+ * **Backend-only: there is no admin screen for this.** It was seeded once by
+ * `AdminSeeder` for as long as the model existed, briefly grew an edit screen, and
+ * that screen was removed again — the values below are configuration, not records,
+ * so they are changed in the seeder or a migration and deployed like any other
+ * code. The row and every column are kept, because all of this is read on the
+ * booking path:
+ *
+ *   - `operating_hours` → which weekdays are open, and the window on each
+ *     (`isOpenOn()`, `hoursFor()`, `slotsFor()`, `isTimeWithinHours()`);
+ *   - `slot_interval_minutes` → how long one appointment slot lasts;
+ *   - `booking_lead_days` → how far ahead bookings open;
+ *   - `minimum_notice_hours` → how much notice a booking needs; and
+ *   - `down_payment_required` / `down_payment_percentage` → the deposit
+ *     `BookingService` records against a booking.
+ *
+ * `SalonSetting::current()` is the accessor every one of those goes through, which
+ * is why the row is a singleton: a second one would make "the salon's hours" a
+ * coin toss on the booking form.
+ *
+ * One-off closures are **not** here. They are records with rows an admin adds and
+ * removes, so they live in `blocked_slots` and have a Calendar screen.
  */
 class SalonSetting extends Model
 {
@@ -21,6 +40,7 @@ class SalonSetting extends Model
         'operating_hours',
         'slot_interval_minutes',
         'booking_lead_days',
+        'minimum_notice_hours',
         'down_payment_required',
         'down_payment_percentage',
     ];
@@ -31,6 +51,7 @@ class SalonSetting extends Model
             'operating_hours' => 'array',
             'slot_interval_minutes' => 'integer',
             'booking_lead_days' => 'integer',
+            'minimum_notice_hours' => 'integer',
             'down_payment_required' => 'boolean',
             'down_payment_percentage' => 'integer',
         ];
@@ -57,6 +78,7 @@ class SalonSetting extends Model
             'operating_hours' => self::defaultHours(),
             'slot_interval_minutes' => 30,
             'booking_lead_days' => 60,
+            'minimum_notice_hours' => 24,
             'down_payment_required' => false,
             'down_payment_percentage' => 50,
         ]);
@@ -65,7 +87,8 @@ class SalonSetting extends Model
     /** @return array<string, array{0: string, 1: string}> */
     public static function defaultHours(): array
     {
-        // Open every day, 9am to 5pm — one window, no per-day variation.
+        // Closed every Monday; open Tuesday to Sunday, 9am to 5pm — one window, no
+        // per-day variation.
         //
         // Previously Monday–Thursday 09:00–18:00, Friday to 19:00, Saturday from
         // 08:00 to 19:00 and Sunday to 17:00, so a customer could book a slot that
@@ -73,8 +96,15 @@ class SalonSetting extends Model
         // schedule now, which is also why the days are listed out rather than
         // generated: `operating_hours` treats a missing day as closed, and a
         // generated list would quietly depend on that rule to mean "open".
+        //
+        // Monday's absence from this map is the whole mechanism for a standing
+        // weekly closure. Nothing in the admin panel has to block it, and an admin
+        // cannot un-block it by accident: `hoursFor()` returns null for a day that
+        // is not listed, `slotsFor()` then returns no slots at all, and the
+        // booking rules refuse the date outright. The customer calendar greys
+        // Mondays from the same map, so the grid and the server cannot disagree
+        // about which weekdays are shut.
         return [
-            'monday' => ['09:00', '17:00'],
             'tuesday' => ['09:00', '17:00'],
             'wednesday' => ['09:00', '17:00'],
             'thursday' => ['09:00', '17:00'],
@@ -140,7 +170,61 @@ class SalonSetting extends Model
         return $this->hoursFor($date) !== null;
     }
 
-    /** Bookable slot times ("HH:MM") for a given date. */
+    /**
+     * The salon's standing lunch break: 12:00 to 13:00, every open day.
+     *
+     * On a 30-minute grid over 09:00–17:00 that is exactly two slots — 12:00
+     * and 12:30 — and they were being offered as bookable because nothing in the
+     * grid knew they should not be. The salon does not take appointments over
+     * lunch, so those two entries were a promise the front desk could not keep.
+     *
+     * Expressed as a window rather than as two literal times, because the grid
+     * is generated: a salon that later moves to 15- or 45-minute slots should
+     * not need a second edit here, and a window reads as the reason the slot is
+     * missing rather than as an arbitrary exclusion.
+     *
+     * A constant rather than a column, for the same reason Monday's closure is a
+     * constant: there is no admin screen for salon settings, so a column would be
+     * a value nobody could change without a deploy. This is the one place to edit.
+     */
+    public const BREAK_START = '12:00';
+
+    public const BREAK_END = '13:00';
+
+    /**
+     * Does this start time fall inside the lunch break?
+     *
+     * Half-open — `>= 12:00` and `< 13:00` — so the break covers the slots that
+     * *start* inside it and 13:00 itself is bookable again. A break that ended
+     * inclusively would also refuse 13:00, which is the first slot after lunch.
+     *
+     * Normalised first, so a time arriving as `12:00:00` or `1:00 PM` is judged
+     * the same as `12:00`. The string comparison that follows is safe because
+     * both sides are then zero-padded 24-hour "HH:MM", which is the format
+     * `operating_hours` is stored in and the format `slotsFor()` produces.
+     */
+    public function isTimeDuringBreak(string $time): bool
+    {
+        try {
+            $normalised = Carbon::parse($time)->format('H:i');
+        } catch (\Throwable) {
+            // Unparseable is not "during the break"; the caller's own validation
+            // is what reports an unusable time, not this predicate.
+            return false;
+        }
+
+        return $normalised >= self::BREAK_START && $normalised < self::BREAK_END;
+    }
+
+    /**
+     * Bookable slot times ("HH:MM") for a given date.
+     *
+     * The lunch break is removed here rather than in the dropdown, so every
+     * consumer of the grid agrees: the time select, `BookingAvailability`'s
+     * blocked-slot sweep (which walks the same grid), and anything else that
+     * asks the salon when it is free. Filtering it in the view would leave the
+     * grid and the rules disagreeing about which times exist.
+     */
     public function slotsFor(Carbon|string $date): array
     {
         $hours = $this->hoursFor($date);
@@ -158,7 +242,12 @@ class SalonSetting extends Model
         $slots = [];
 
         while ($start->lt($end)) {
-            $slots[] = $start->format('H:i');
+            $slot = $start->format('H:i');
+
+            if (! $this->isTimeDuringBreak($slot)) {
+                $slots[] = $slot;
+            }
+
             $start->addMinutes($step);
         }
 

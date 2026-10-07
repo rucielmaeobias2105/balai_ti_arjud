@@ -54,6 +54,9 @@ class Nav
         'admin.reports.*' => 'reports',
         'admin.promos.*' => 'promos',
         'admin.messages.*' => 'messages',
+        // The one-off closures an admin adds and removes. The recurring schedule
+        // has no screen and so no nav key.
+        'admin.calendar.*' => 'calendar',
     ];
 
     public static function customerCurrent(): ?string

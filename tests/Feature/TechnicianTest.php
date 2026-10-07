@@ -270,7 +270,11 @@ class TechnicianTest extends TestCase
             ->assertOk()
             ->getContent();
 
-        $this->assertStringContainsString('Choose Technician', $html);
+        // The heading it used to sit under was "6. Choose Technician & Special Request".
+        // That panel was merged into the last step, so the section is named by the
+        // heading that exists now — what this test is really about is the dropdown
+        // and its options, which are asserted either way.
+        $this->assertStringContainsString('Technician &amp; Special Request', $html);
         $this->assertStringContainsString('name="technician_id"', $html);
         $this->assertStringContainsString('No preference', $html);
         $this->assertStringContainsString('Maria Santos', $html);
@@ -517,7 +521,7 @@ class TechnicianTest extends TestCase
             'customer_phone' => '09171234567',
             'preferred_date' => $this->bookableDate(),
             'preferred_time' => '10:00',
-            // Step 5 asks a first-timer what they had done before, and these
+            // Step 4 asks a first-timer what they had done before, and these
             // bookings are posted by accounts with no completed history.
             'last_services_availed_note' => 'Glow Manicure',
             'down_payment_reference' => 'GCASH1234567890',

@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Customer\DeleteAppointmentsRequest;
 use App\Http\Requests\Customer\StoreBookingRequest;
 use App\Models\Appointment;
+use App\Models\BlockedSlot;
 use App\Models\SalonSetting;
 use App\Models\Service;
 use App\Models\TermsAndCondition;
@@ -142,6 +143,11 @@ class AppointmentController extends Controller
 
         return $rows->mapWithKeys(fn (Appointment $appointment) => [
             $appointment->id => [
+                // The dialog needs its own id to build the Book Again link from.
+                // `appointmentViewer` is shared with the admin list, which has no
+                // such link, so the id travels in the payload rather than being
+                // read off the row that opened the dialog.
+                'id' => $appointment->id,
                 'reference' => $appointment->reference_number,
                 'status' => $appointment->status->value,
                 'statusLabel' => $appointment->status->label(),
@@ -170,7 +176,12 @@ class AppointmentController extends Controller
                     'price' => PriceFormatter::display($line->display_price, '—'),
                     'total' => number_format((float) $line->line_total, 2),
                     'quantity' => (int) $line->quantity,
-                    'duration' => (int) $line->duration_minutes,
+                    // No `duration`. It was here to render "1 × 0 min" under each
+                    // service in the details dialog, and the durations on these
+                    // lines are 0 because the column was never filled in — so the
+                    // key only ever produced a zero that had to be hidden again
+                    // in the view. See the note on that line in
+                    // resources/views/customer/appointments/index.blade.php.
                 ])->values()->all(),
                 'statusHistory' => $appointment->statusHistory
                     ->take(5)
@@ -301,8 +312,121 @@ class AppointmentController extends Controller
         return $message;
     }
 
+/**
+     * Book Again — repeat a finished visit.
+     *
+     * A redirect rather than a page of its own, for the same reason
+     * `appointments.show` is: the booking form is the destination, and there is no
+     * second screen to keep in step with it. The redirect lands on
+     * `appointments.create?from=ID`, which pre-fills the basket with the services
+     * from that visit and nothing else.
+     *
+     * What is *not* carried over is the point. The date and time are left empty and
+     * the technician is not pre-selected, because the customer is booking a new
+     * appointment and a past one says nothing about when they want to come back or
+     * whether they want the same person. Pre-filling those would make it far too
+     * easy to confirm a booking that lands on a date the customer never meant.
+     *
+     * Only Completed appointments can be repeated. Cancelled ones have no settled
+     * basket worth copying, and Pending or Confirmed is a visit that has not
+     * happened — repeating it is Reschedule, which already exists and which the
+     * status rules below keep pointing at.
+     */
+    public function bookAgain(Appointment $appointment): RedirectResponse
+    {
+        $this->authorizeOwnership($appointment);
+
+        abort_unless(
+            $appointment->status === AppointmentStatus::Completed,
+            403,
+            'Only a completed appointment can be booked again.',
+        );
+
+        return redirect()->route('appointments.create', ['from' => $appointment->id]);
+    }
+
+    /**
+     * The finished appointment `?from=` names, if it is one this customer may
+     * repeat.
+     *
+     * Null rather than a 403 for a foreign or unfinished id: `bookAgain()` is the
+     * guarded way in, and this is the fallback for a pasted or stale URL. Sending
+     * somebody to an error page about a booking they were never shown would leak
+     * that it exists; dropping the parameter and showing an ordinary empty booking
+     * form leaks nothing and does the job.
+     */
+    protected function appointmentToRepeat(Request $request): ?Appointment
+    {
+        $id = $request->integer('from') ?: null;
+
+        if ($id === null || auth()->id() === null) {
+            return null;
+        }
+
+        return auth()->user()->appointments()
+            ->whereKey($id)
+            ->where('status', AppointmentStatus::Completed->value)
+            ->first();
+    }
+
+    /**
+     * Pre-select the basket from a past visit.
+     *
+     * Exact ids, not slugs: `preselectFromRequest()` matches on slug and then takes
+     * whichever variant is flagged default, which for a repeat booking is the wrong
+     * answer whenever the customer chose a non-default variant the first time. The
+     * line is copied across as it was booked.
+     *
+     * A line whose service has since been retired or deactivated is skipped rather
+     * than refused — the form cannot offer something the catalogue no longer lists,
+     * and one stale line should not cost the customer the rest of their basket. If
+     * nothing survives, the form opens empty, which is the same as arriving at
+     * `/book` by hand.
+     *
+     * @param  \Illuminate\Support\Collection<string, \Illuminate\Support\Collection<int, Service>>  $grouped
+     * @return array<string, array{service_id: int, service_variant_id: ?int, quantity: int}>
+     */
+    protected function preselectFromAppointment(Appointment $appointment, $grouped): array
+    {
+        $bookable = $grouped->flatten()->keyBy('id');
+
+        $selected = [];
+
+        foreach ($appointment->serviceLines as $line) {
+            $service = $bookable->get($line->service_id);
+
+            if (! $service) {
+                continue;
+            }
+
+            /*
+             * The variant has to belong to this service and still exist. A line can
+             * outlive its variant — variants are deleted, and the appointment keeps
+             * the name it was booked under — and pre-selecting an id the form cannot
+             * render would produce a basket that fails `StoreBookingRequest`.
+             */
+            $variantId = $line->service_variant_id
+                && $service->variants->contains('id', $line->service_variant_id)
+                    ? $line->service_variant_id
+                    : null;
+
+            $selected[$service->id] = [
+                'service_id' => $service->id,
+                'service_variant_id' => $variantId,
+                'quantity' => max(1, (int) $line->quantity),
+            ];
+        }
+
+        return $selected;
+    }
+
     /**
      * Customer Flow 5 (part 2) — Book Appointment form.
+     *
+     * `?from=ID` is Book Again: the same form, pre-filled with the services from a
+     * past visit. `AppointmentController::bookAgain()` is what sends the customer
+     * here; this method does the work, so the pre-fill logic has one home whether
+     * it was reached through the button or a pasted URL.
      */
     public function create(Request $request): View
     {
@@ -317,7 +441,23 @@ class AppointmentController extends Controller
             ->get()
             ->groupBy('category');
 
-        $selected = $this->preselectFromRequest($request, $services);
+        /*
+         * Book Again's source appointment, if the URL names one.
+         *
+         * Read before `preselectFromRequest()` so a `?services[]=` on the same
+         * request cannot quietly override the appointment the customer asked to
+         * repeat — the button is the more specific instruction.
+         *
+         * A source that is not this customer's, or is not finished, is discarded
+         * rather than refused. `bookAgain()` refuses both at the door; a hand-typed
+         * `?from=` should land on an empty ordinary form, not an error page about
+         * a booking the customer was never shown.
+         */
+        $previous = $this->appointmentToRepeat($request);
+
+        $selected = $previous
+            ? $this->preselectFromAppointment($previous, $services)
+            : $this->preselectFromRequest($request, $services);
 
         // Default to the next day that actually has availability.
         $prefilledDate = $request->input('date') ?: $this->nextAvailableDate($availability);
@@ -391,12 +531,34 @@ class AppointmentController extends Controller
 
     /**
      * Customer Flow 5 (part 2) — Store booking, then show the summary.
+     *
+     * The idempotency key is checked here, before any work, so a repeated
+     * submission is answered with the booking it already produced rather than
+     * creating a second one. `BookingService` re-checks behind a unique index for
+     * the case two requests arrive together; this is the cheap path for the common
+     * one, which is a double-tap on a form that is already on its way to the
+     * server.
+     *
+     * The response is deliberately the same redirect and the same wording as a
+     * first submission. A customer who double-tapped has done nothing wrong, and
+     * telling them "duplicate ignored" would raise a question they have no way to
+     * answer — where the extra booking went, or which of the two references is
+     * real. They get their booking, once.
      */
     public function store(StoreBookingRequest $request): RedirectResponse
     {
-        $lines = $this->booking->resolveLines($request->input('services', []));
-
         $user = $request->user();
+
+        if ($existing = $this->booking->resolveIdempotent(
+            $request->validated('idempotency_key'),
+            $user?->id,
+        )) {
+            return redirect()
+                ->route('appointments.index', ['view' => $existing->id])
+                ->with('status', 'Your booking request has been submitted. Reference: '.$existing->reference_number);
+        }
+
+        $lines = $this->booking->resolveLines($request->input('services', []));
 
         $appointment = $this->booking->create(
             $request->safe()->except(['services', 'agree_terms']) + [
@@ -416,22 +578,27 @@ class AppointmentController extends Controller
             ->with('status', 'Your booking request has been submitted. Reference: '.$appointment->reference_number);
     }
 
-    /**
- * JSON slot lookup backing the booking form's date picker.
+/**
+     * JSON slot lookup backing the booking form's date picker.
      *
-     * `service_id` is still accepted, and still ignored.
+ * `service_id` is still accepted, and still ignored: no rule depends on which
+ * service is in the basket, so the map of unavailable dates does not vary by it.
+     * Kept rather than dropped because the client sends it on every call, and a
+     * request that no longer validated would 422 instead of answering.
      *
-     * It used to decide which blocked ranges applied — a category block closed
-     * only that category's services — and the form re-fetched on every basket
-     * change to re-grey the dates. With the Calendar & Blocked Dates feature gone
-     * no rule depends on the service, so the map of unavailable dates no longer
-     * varies and neither does the response.
+     * The response answers three separate questions about a date, and they are
+     * separate keys because the form treats them differently:
      *
-     * Kept rather than dropped for one reason: the client sends it on every call
-     * and a request that no longer validates would 422 instead of answering.
-     * Removing the parameter from the client and the endpoint at the same time
-     * would be the tidier change; leaving it accepted costs nothing and avoids
-     * making this endpoint's contract depend on that edit landing.
+     *   `slots`        — times a customer may pick, with taken ones and blocked
+     *                    ones already removed;
+     *   `blockedSlots` — the times an admin blocked, so the dropdown can show them
+     *                    struck through instead of silently missing;
+     *   `wholeDay`     — the date itself is closed.
+     *
+     * `blockedSlots` is why the blocked times are not simply absent. A customer who
+     * sees 9:00 and 10:30 but not 10:00 cannot tell whether 10:00 is taken, is
+     * blocked, or was never offered; showing it disabled says "not today, but the
+     * day is".
      */
     public function slots(Request $request): JsonResponse
     {
@@ -441,28 +608,48 @@ class AppointmentController extends Controller
         ]);
 
         $availability = BookingAvailability::make();
+        $date = $data['date'];
 
         return response()->json([
-            'date' => $data['date'],
-            'slots' => $availability->availableSlots($data['date']),
-            'open' => $availability->isDateAvailable($data['date']),
-            'problems' => $availability->dateProblems($data['date']),
-            // Minimum notice has to be enforced by the input's own `min` too;
-            // this lets the form say why a date is refused without a round trip.
+            'date' => $date,
+            'slots' => $availability->availableSlots($date),
+            'blockedSlots' => $availability->blockedTimes($date),
+            'open' => $availability->isDateAvailable($date),
+            'wholeDay' => $availability->isDateBlocked($date),
+            'problems' => $availability->dateProblems($date),
+
+            /*
+             * Minimum notice has to be enforced by the input's own `min` too; this
+             * lets the form say why a date is refused without a round trip.
+             */
             'minDate' => $availability->firstBookableDate()->toDateString(),
             'maxDate' => $availability->lastBookableDate()->toDateString(),
 
             /*
-             * Still present, and always empty.
+             * Every whole day closed inside the window, so the form's calendar can
+             * grey them out.
              *
-             * The booking form keys its date-unavailable hint off this key, and
-             * removing the key would make the hint silently never render. The
-             * closed-day and out-of-window cases are already reported in
-             * `problems`, which the same form reads — so this stays as the shape
-             * the client expects, with nothing in it.
+             * Sent for the whole bookable range rather than the visible month: the
+             * range is bounded by `booking_lead_days` and is at most a year of
+             * dates, and a customer paging the calendar past the edge of the
+             * already-loaded map should get the real answer rather than a day that
+             * looks free.
              */
-            'blockedDates' => (object) [],
+            'blockedDates' => $this->blockedDatesPayload($availability),
         ]);
+    }
+
+    /**
+     * Whole days closed, keyed by date.
+     *
+     * @return array<string, string|null>
+     */
+    protected function blockedDatesPayload(BookingAvailability $availability): array
+    {
+        return collect(BlockedSlot::wholeDaysBetween(
+            $availability->firstBookableDate(),
+            $availability->lastBookableDate(),
+        ))->map(fn (BlockedSlot $slot) => $slot->reason)->all();
     }
 
     /* ------------------------------------------------------------------ */

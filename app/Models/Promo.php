@@ -95,11 +95,26 @@ class Promo extends Model
      * a shared default here would leave neither of them any way to tell a promo
      * with a real picture from one without.
      */
+    /**
+     * The absolute URL of the uploaded picture, or null when there is none.
+     *
+     * Null rather than a fallback image on purpose: the customer promo card and
+     * the admin thumbnail each have their own placeholder, and a URL pointing at
+     * a shared default here would leave neither of them any way to tell a promo
+     * with a real picture from one without.
+     *
+     * `url()` and not `asset()`, for the reason set out on
+     * `User::profile_photo_url`: `asset()` builds from `APP_URL`, so on a
+     * deployed host whose `APP_URL` is still `localhost` — the default in
+     * `.env.example`, and the value most shared hosts start from — every picture
+     * points at a different origin and renders broken. `url()` follows whatever
+     * host the browser actually asked for.
+     */
     public function getImageUrlAttribute(): ?string
     {
         $path = $this->imagePath();
 
-        return $path ? asset('storage/'.$path) : null;
+        return $path ? url('storage/'.$path) : null;
     }
 
     public function getValidityLabelAttribute(): string

@@ -128,12 +128,16 @@ class HomePromosAndMostBookedTest extends TestCase
     /* ------------------------------------------------------------------ */
 
     /**
-     * A service with no duration must not read "0 min".
+     * The duration label still formats correctly, for the screens that show it.
      *
-     * `(int) null` is 0, so an un-durated service used to claim it takes no time
-     * at all. The label is empty instead, and the separator goes with it.
+     * `duration_minutes` is NOT NULL in the migrations, so an empty label cannot
+     * be produced through the database and is asserted here instead.
+     *
+     * No customer-facing row reads this accessor any more — the booking rows and
+     * the price list show the price alone. It is kept because the admin
+     * catalogue still lists a service's duration.
      */
-    public function test_a_service_with_no_duration_shows_no_duration_in_booking(): void
+    public function test_the_duration_label_formats_minutes_and_hours(): void
     {
         $this->assertSame('', (new Service(['duration_minutes' => null]))->duration_label);
         $this->assertSame('', (new Service(['duration_minutes' => 0]))->duration_label);
@@ -143,14 +147,15 @@ class HomePromosAndMostBookedTest extends TestCase
     }
 
     /**
-     * No "from" on the booking rows, and no leading separator.
+     * The booking row carries the price and nothing else.
      *
-     * The empty-duration case cannot be created on a clean schema —
-     * `services.duration_minutes` is NOT NULL in the migrations — so the label's
-     * behaviour for a null duration is asserted directly above, and this checks
-     * the rendered row around it.
+     * No duration — "1 hr 15 min" and friends are gone from the service rows —
+     * and with them the separator that used to sit between duration and price,
+     * so the row cannot read "· ₱799". Also no "from": it was on every bookable
+     * row whatever the price, so a fixed service read "from ₱799", which reads as
+     * an estimate on a price that is not one.
      */
-    public function test_the_booking_row_has_no_from_prefix_and_no_leading_separator(): void
+    public function test_the_booking_row_shows_the_price_without_a_duration_or_separator(): void
     {
         ServiceCategory::create(['name' => 'Nail Care', 'color' => '#E11D48', 'sort_order' => 0]);
         $this->makeService([
@@ -164,14 +169,15 @@ class HomePromosAndMostBookedTest extends TestCase
         $user = $this->makeUser();
         $html = $this->actingAs($user)->get(route('appointments.create'))->assertOk()->getContent();
 
-        $this->assertStringContainsString('1 hr 15 min', $html, 'The duration is shown.');
+        $this->assertStringContainsString('₱799', $html, 'The price is shown.');
+        $this->assertStringNotContainsString('1 hr 15 min', $html, 'The duration is no longer shown on the booking row.');
         $this->assertStringNotContainsString('0 min', $html);
         $this->assertStringNotContainsString('>from ₱', $html, 'The "from" prefix was removed from the booking rows.');
         $this->assertStringNotContainsString(' · </span>', $html, 'No separator left stranded where a duration would be.');
     }
 
-    /** A priced service shows its price plainly — no "from" on a fixed figure. */
-    public function test_a_fixed_price_shows_without_a_from_prefix(): void
+    /** A fixed price shows plainly — no "from", and no duration beside it. */
+    public function test_a_fixed_price_shows_without_a_from_prefix_or_duration(): void
     {
         ServiceCategory::create(['name' => 'Manicure & Pedicure', 'color' => '#E11D48', 'sort_order' => 0]);
         $this->makeService([
@@ -185,7 +191,8 @@ class HomePromosAndMostBookedTest extends TestCase
         $user = $this->makeUser();
         $html = $this->actingAs($user)->get(route('appointments.create'))->assertOk()->getContent();
 
-        $this->assertStringContainsString('1 hr', $html, 'A service with a duration still shows it.');
+        $this->assertStringContainsString('₱799', $html);
         $this->assertStringNotContainsString('>from ₱', $html);
+        $this->assertStringNotContainsString('1 hr', $html, 'No duration on the row, whether or not the price is fixed.');
     }
 }

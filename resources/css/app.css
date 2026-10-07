@@ -806,12 +806,31 @@
      * what stops a one-line offer from collapsing the picture to a sliver.
      */
     .home-promo-grid {
-        @apply mt-14 grid gap-7;
+        @apply mx-auto grid max-w-[1100px] gap-10;
     }
 
+    /*
+     * THE CARD — MCACAFE_v1's `.promo-featured-card`, in BTA's theme.
+     *
+     * The reference's promo card is a horizontal row: picture panel on the left
+     * at 40% of the width, text panel on the right taking the rest, both
+     * stretched to the same height, rounded corners clipping the whole thing, and
+     * a soft drop shadow. It is not a grid and it is not `items-start`, so both
+     * columns are always exactly as tall as each other — the text is centred in
+     * its own panel rather than pinned to the top, which is what makes a short
+     * offer look composed rather than half-empty.
+     *
+     * This was `grid md:grid-cols-2 md:items-start`, so the picture panel was
+     * only as tall as the text beside it and a long description grew the card
+     * downward, leaving the picture floating at the top of a tall empty column.
+     * That is the shape the reference does not have.
+     *
+     * Column below `md`, row from `md` up, matching the reference's own
+     * `flex-direction` switch at its 760px breakpoint.
+     */
     .home-promo-card {
-        @apply grid overflow-hidden rounded-[22px] border border-line/85 bg-soft md:grid-cols-2;
-        box-shadow: 0 12px 34px rgb(var(--color-primary) / 0.06);
+        @apply flex flex-col overflow-hidden rounded-[28px] border border-line/85 bg-cream md:flex-row md:items-stretch;
+        box-shadow: 0 10px 25px rgb(var(--color-primary) / 0.07);
         transition: transform 0.25s ease, box-shadow 0.25s ease;
     }
 
@@ -820,17 +839,57 @@
         box-shadow: 0 18px 44px rgb(var(--color-primary) / 0.12);
     }
 
+    /*
+     * THE PICTURE PANEL — the reference's `.promo-featured-images`.
+     *
+     * 40% of the card's width, at least 400px tall on desktop and 240px on a
+     * phone, so the panel is a substantial block rather than a strip. `flex-none`
+     * is load-bearing: in a flex row `width` alone is a suggestion, and the text
+     * column would otherwise win the free space and squeeze the picture.
+     *
+     * No `aspect-ratio` here, which is the whole difference from what this was.
+     * An aspect ratio fixed the panel's shape independently of the picture in it,
+     * and a portrait poster — which is what promos are — then fitted inside a
+     * landscape or 16:9 box with most of the panel empty. Here the panel is at
+     * least as tall as the reference asks and as tall as the text column needs,
+     * so the two decide it between them and the picture fills what it is given.
+     */
     .home-promo-media {
-        @apply relative flex aspect-[16/9] items-center justify-center overflow-hidden bg-gradient-to-br from-blush to-gold-light/50 md:aspect-auto md:min-h-[13rem] md:self-stretch;
+        @apply relative flex min-h-[240px] w-full items-center justify-center overflow-hidden bg-gradient-to-br from-blush to-gold-light/50 md:min-h-[420px] md:w-[40%] md:flex-none;
     }
 
+    /*
+     * `contain`, not `cover` — the one place this card deliberately departs from
+     * the reference, which uses `cover`.
+     *
+     * A promo image is a poster: the price, the validity dates and the salon's
+     * name are all inside it, often along its own bottom edge. `cover` fills the
+     * panel by scaling until both axes are covered, which for a portrait poster in
+     * this panel means the top and bottom are cropped off — the part carrying the
+     * offer — and a customer sees a picture that says less than the one the salon
+     * uploaded.
+     *
+     * `contain` shows all of it and lets the panel's own gradient fill whatever is
+     * left, which is what "the whole image is shown" means. The panel is sized so
+     * that leftover is small: 40% of a 1100px card is 440px, against a 420px
+     * minimum height, so a 2:3 portrait fills most of the panel's width rather
+     * than floating in the middle of it.
+     */
     .home-promo-media img {
-        @apply h-full w-full object-cover transition duration-500;
+        @apply block h-full w-full object-contain transition duration-500;
     }
 
-    .home-promo-card:hover .home-promo-media img {
-        transform: scale(1.06);
-    }
+    /*
+     * No zoom on hover.
+     *
+     * The card used to scale its picture by 1.06. With `cover` that was harmless,
+     * because the image already filled the panel. With `contain` the image element
+     * *is* the panel, so scaling it pushes it past the edges of a column that has
+     * `overflow-hidden` — and a picture fitted by width loses its left and right
+     * again, which is the cropping this rule exists to remove, now on hover only.
+     *
+     * The card still lifts; it just no longer moves the picture inside it.
+     */
 
     .home-promo-media > .badge {
         @apply absolute left-3.5 top-3.5;
@@ -841,12 +900,20 @@
         opacity: 0.35;
     }
 
+    /*
+     * THE TEXT PANEL — the reference's `.promo-featured-body`.
+     *
+     * `justify-center` is the piece worth keeping: the reference centres its copy
+     * vertically, so a two-line offer sits in the middle of the panel rather than
+     * clinging to the top. `min-w-0` stops a long unbroken promo code from
+     * widening the flex row and pushing the picture off the card.
+     */
     .home-promo-body {
-        @apply flex flex-col p-6;
+        @apply flex min-w-0 flex-1 flex-col justify-center p-6 md:p-[2rem_2.2rem];
     }
 
     .home-promo-body h3 {
-        @apply font-heading text-2xl font-bold text-primary-dark;
+        @apply font-heading text-[1.5rem] font-extrabold leading-snug text-primary-dark;
     }
 
     /*
@@ -854,15 +921,32 @@
      * copy is written as two or three short paragraphs and read as a
      * description of what the customer gets, so truncating it to a fixed
      * character count threw away the actual offer.
-
+     *
      * `whitespace-pre-line` does the paragraph breaks without the `<br>` tags
      * reaching the DOM, and `break-words` stops a long unbroken URL or promo
      * code from pushing the card wider than its column.
+     *
+     * There is no `-webkit-line-clamp` here any more, and that is the point of
+     * the whole change. It held the copy to five lines and hid the overflow,
+     * which is what made a long offer look truncated with no way to see the rest
+     * — the failure this card was rebuilt to fix. The paragraph now takes the
+     * height it asks for and the card grows to match, so what the admin wrote is
+     * what the customer reads.
+     *
+     * `flex-1` stays, so on a short promo the foot is still pushed to the bottom
+     * of the column rather than floating directly under two lines of copy. On a
+     * long one there is nothing to distribute and the foot simply follows.
      */
     .home-promo-body > p {
-        @apply mt-2.5 flex-1 whitespace-pre-line break-words text-[14.5px] leading-relaxed text-ink-muted;
+        @apply mt-2.5 whitespace-pre-line break-words text-[14.5px] leading-relaxed text-ink-muted;
     }
 
+    /*
+     * The foot is the reference's `.promo-validity` plus its button: no rule
+     * above them, both sitting at the bottom of the text panel, the validity on
+     * the left and the pill button on the right. The hairline above it is BTA's
+     * own and is what separates the offer from its terms.
+     */
     .home-promo-foot {
         @apply mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4;
     }

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Support\IntendedUrl;
 use App\Support\SessionIdentity;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
@@ -169,13 +170,19 @@ class SingleActiveRoleTest extends TestCase
     }
 
     /**
-     * A remembered destination still works — for the guard that asked for it.
+     * A customer sign-in always lands on the home page.
      *
-     * Scoping the key must not cost the feature it exists for: a customer who
-     * signs in after being bounced off their appointments is still sent to their
-     * appointments.
+     * This is the behaviour the customer login was changed to. It used to be
+     * `IntendedUrl::pull()`, which honoured the remembered destination — and
+     * because My Appointments is in the customer navigation and is guarded, the
+     * page that caused the bounce was most often My Appointments, so signing in
+     * appeared to drop everybody onto the appointments list.
+     *
+     * The scope still has to do its job, though: the admin guard keeps its own
+     * remembered destination (asserted below), so the two logins still cannot
+     * steal each other's.
      */
-    public function test_a_guard_is_still_returned_to_the_page_it_asked_for(): void
+    public function test_a_customer_sign_in_lands_on_the_home_page_even_after_being_bounced(): void
     {
         $user = $this->makeUser();
 
@@ -184,16 +191,49 @@ class SingleActiveRoleTest extends TestCase
         $this->post(route('login.store'), [
             'login' => $user->email,
             'password' => 'password',
-        ])->assertRedirect(route('appointments.index'));
+        ])->assertRedirect(route('home'));
+    }
+
+    /** …and the same bounce does not take the admin to the customer's pages. */
+    public function test_a_customer_bounce_does_not_move_the_admin_login(): void
+    {
+        $admin = $this->makeAdmin();
+
+        $this->get(route('appointments.index'))->assertRedirect(route('login'));
+
+        $this->post(route('admin.login.store'), [
+            'username' => $admin->username,
+            'password' => 'password',
+        ])->assertRedirect(route('admin.dashboard'));
     }
 
     /**
-     * A destination is only ever honoured once.
+     * The admin login still honours a remembered destination.
      *
-     * `pull()` clears the key as it reads it, so a URL abandoned earlier in the
-     * session cannot hijack a later login.
+     * The customer side stopped doing this on purpose; the admin side did not,
+     * because a staff member bounced off a panel page and put back on that page
+     * is the case the mechanism was built for.
      */
-    public function test_a_remembered_destination_is_not_reused_by_a_second_login(): void
+    public function test_an_admin_is_still_returned_to_the_panel_page_it_asked_for(): void
+    {
+        $admin = $this->makeAdmin();
+
+        $this->get(route('admin.appointments.index'))->assertRedirect(route('admin.login'));
+
+        $this->post(route('admin.login.store'), [
+            'username' => $admin->username,
+            'password' => 'password',
+        ])->assertRedirect(route('admin.appointments.index'));
+    }
+
+    /**
+     * A customer bounce leaves nothing behind for the next sign-in.
+     *
+     * The customer login clears the remembered key rather than leaving it to
+     * expire, so a stale URL cannot sit in the session for the rest of the
+     * visit — and cannot come back if anything starts honouring it again.
+     */
+    public function test_a_customer_bounce_leaves_nothing_behind_for_the_next_login(): void
     {
         $user = $this->makeUser();
 
@@ -202,7 +242,9 @@ class SingleActiveRoleTest extends TestCase
         $this->post(route('login.store'), [
             'login' => $user->email,
             'password' => 'password',
-        ])->assertRedirect(route('appointments.index'));
+        ])->assertRedirect(route('home'));
+
+        $this->assertNull(session(IntendedUrl::SESSION_KEY.'customer'));
 
         $this->post(route('logout'));
 

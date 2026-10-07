@@ -78,17 +78,30 @@ class AuthenticatedSessionController extends Controller
         $user->forceFill(['last_login_at' => now()])->saveQuietly();
 
         /*
-         * `IntendedUrl::pull()` rather than `redirect()->intended()`.
+         * Always the home page, and the remembered destination is discarded.
          *
-         * Both guards share one session cookie, so Laravel's single
-         * `url.intended` holds whichever destination was asked for most
-         * recently by *either* guard. Reading it here meant a guest who had
-         * been bounced off `/admin` was sent there after signing in as a
-         * customer — to a page that then bounced them straight back out.
-         * Scoping the destination to this guard is what stops the two logins
-         * stealing each other's; see App\Support\IntendedUrl.
+         * This used to be `IntendedUrl::pull($request, 'customer', route('home'))`,
+         * which sent a customer who had been bounced off a guarded page back to
+         * that page. In practice the page they were bounced off most often was
+         * My Appointments — it is in the customer navigation, so it is where
+         * people click, and it is guarded — so signing in appeared to dump
+         * everybody on the appointments list whether they wanted it or not.
+         *
+         * The home page is the only landing that is right for both cases: the
+         * customer who came to sign in, and the customer who was interrupted
+         * halfway to something. The cost is that a customer sent to the login
+         * screen by clicking "Book Appointment" now arrives at the home page
+         * rather than back at the booking form, and has to click through again.
+         * That is the trade this makes, deliberately, and it is why the
+         * remembered URL is cleared rather than left to expire.
+         *
+         * The admin login is untouched: staff signing in after being bounced off
+         * a panel page still go back to it, which is the case the mechanism was
+         * built for and has no equivalent complaint attached to it.
          */
-        return redirect()->to(IntendedUrl::pull($request, 'customer', route('home')));
+        IntendedUrl::forget($request, 'customer');
+
+        return redirect()->route('home');
     }
 
     /**

@@ -124,7 +124,7 @@
                 <div class="bta-card overflow-hidden p-0">
                     <div class="aspect-[4/3] w-full lg:aspect-auto lg:h-full lg:min-h-[16rem]">
                         <iframe
-                            title="Street view of Balai ti Arjud, Glow &amp; Co. Beauty Lounge"
+                            title="Street view of Balai ti Arjud, Glow & Co. Beauty Lounge"
                             src="{{ $mapUrl }}"
                             class="h-full w-full border-0"
                             loading="lazy"

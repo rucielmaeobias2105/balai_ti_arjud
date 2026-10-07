@@ -62,6 +62,34 @@ class AdminUnseenAppointmentsTest extends TestCase
         return str_replace('\\', '', str_replace('\u0022', '"', $html));
     }
 
+    /**
+     * The seeded payload of the one component that owns the badges.
+     *
+     * `adminLiveNotifications` is mounted once per admin page and is the only
+     * thing that reads the unseen count, so this is the markup that has to be
+     * right. Extracting it keeps an assertion about the badge from being decided
+     * by an unrelated number somewhere else on the page.
+     */
+    private function notificationsPayload(string $html): string
+    {
+        $start = strpos($html, 'adminLiveNotifications(');
+
+        $this->assertNotFalse($start, 'The live notifications component was not mounted.');
+
+        // The payload is the value of the component's own `x-data`, and that
+        // attribute is the first one after the call. Searching forward from just
+        // past its opening quote to the last quote before the next attribute
+        // avoids depending on how `@js()` chooses to escape anything inside the
+        // object — a literal quote would otherwise be read as the end.
+        $open = strpos($html, '"', strpos($html, 'x-data', $start));
+        $next = strpos($html, 'x-on:', $start);
+
+        $this->assertNotFalse($open, 'The notifications component has no x-data attribute.');
+        $this->assertNotFalse($next, 'The notifications component has no following attribute.');
+
+        return substr($html, $start, strrpos(substr($html, 0, $next), '"') - $start);
+    }
+
     /** The markup of the count badge inside the Appointments sidebar row. */
     private function sidebarBadgeMarkup(string $html): string
     {
@@ -375,7 +403,14 @@ class AdminUnseenAppointmentsTest extends TestCase
 
         // No count in the seeded poll payload either — the layout reads the same
         // helper, after the action has run.
-        $payload = $this->unescaped($html);
+        //
+        // Scoped to the notifications component's own payload rather than the
+        // whole page. A page-wide search for `"pending":1` used to be a safe
+        // proxy for "the badge is stale", but it is not: the Appointments screen
+        // also seeds per-status tab totals, which are keyed by status name and so
+        // legitimately contain `"pending":1` for a list with one pending booking.
+        // Two payloads, one key, and only one of them is about unseen bookings.
+        $payload = $this->unescaped($this->notificationsPayload($html));
 
         $this->assertStringContainsString('"pending":0', $payload);
         $this->assertStringNotContainsString('"pending":1', $payload);

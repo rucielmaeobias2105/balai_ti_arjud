@@ -70,11 +70,6 @@
                 class="input py-2 file:mr-3 file:rounded-lg file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-cream hover:file:bg-primary-dark"
             >
 
-            <p class="input-hint">
-                JPG, PNG or WEBP. Up to 4 MB. Without one, this category keeps the
-                picture it already resolves to.
-            </p>
-
             @if ($category->exists && $category->photo)
                 <label class="mt-3 flex items-center gap-2 text-sm text-ink">
                     <input type="checkbox" name="remove_photo" value="1" class="checkbox">

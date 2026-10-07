@@ -29,7 +29,15 @@
 
     @php $action = $term->exists ? route('admin.terms.update', $term) : route('admin.terms.store'); @endphp
 
-    <form method="POST" action="{{ $action }}" x-data="richTextEditor()" novalidate>
+    {{-- `guardSubmit` refuses an empty policy and opens the modal below instead.
+         This is the replacement for the `alert()` that used to sit on a `submit`
+         listener — which could not work in any case, since returning `false`
+         from an `addEventListener` callback does not cancel the submission. --}}
+    <form method="POST" action="{{ $action }}"
+          x-data="richTextEditor()"
+          x-on:submit="guardSubmit($event)"
+          x-on:terms-insert-link-confirmed.window="applyLink($event.detail.url)"
+          novalidate>
         @csrf
         @if ($term->exists) @method('PUT') @endif
 
@@ -129,11 +137,24 @@
                         </x-ui.alert>
                     @endif
 
+                    {{-- The full editor, which is also the only place a policy can
+                         be taken back down.
+
+                         The index publishes through its own button and no longer
+                         carries a checkbox, because a publication flag on a Save
+                         form means every typo fix changes what the public reads.
+                         This screen is the deliberate exception: it is not a list,
+                         it is one policy at a time, and un-ticking here and saving
+                         is a two-step act on one screen that `update()` refuses if
+                         it would quietly demote a live policy.
+
+                         So "Publish to customers" is an action, the same wording the
+                         index uses for the same decision. --}}
                     <x-ui.form.checkbox
                         name="is_published"
                         value="1"
                         :checked="old('is_published', $term->exists ? $term->is_published : true)"
-                        label="Publish this policy (show it to customers)"
+                        label="Publish this policy to customers"
                     />
                 </x-ui.card>
 
@@ -144,6 +165,56 @@
                     <a href="{{ route('admin.terms.index') }}" class="btn-ghost w-full">Cancel</a>
                 </div>
             </aside>
+        </div>
+
+        {{-- Replaces the `alert()` that used to fire on an empty policy. It is
+             the same `x-ui.dialog` shell as every other admin dialog, so it gets
+             the toned header, the icon and the backdrop dismissal for free; the
+             nested scope is what supplies the `open`/`close()` pair the shell
+             reads. --}}
+        <div x-data="{ open: false, close() { this.open = false } }"
+             x-on:terms-content-empty.window="open = true">
+            <x-ui.dialog title="Add Terms Content" tone="info" icon="heroicon-o-exclamation-triangle" max-width="max-w-md">
+                <p class="text-sm leading-relaxed text-ink">
+                    Please enter the terms content before saving. A published policy with
+                    no text leaves customers an empty page.
+                </p>
+
+                <x-slot:footer>
+                    <button type="button" class="btn-primary" x-on:click="close()">Got it</button>
+                </x-slot:footer>
+            </x-ui.dialog>
+        </div>
+
+        {{-- Replaces the `window.prompt()` behind the toolbar's link button. A
+             real field, so the URL can be pasted, corrected and read aloud, and
+             `type="url"` rejects a bare "example.com" the way the native prompt
+             never did. Enter confirms from the field itself. --}}
+        <div x-data="{ open: false, url: '', close() { this.open = false } }"
+             x-on:insert-link.window="url = ''; open = true"
+             x-on:terms-insert-link-confirmed.window="url = ''; open = false">
+            <x-ui.dialog title="Insert Link" tone="info" icon="heroicon-o-link" max-width="max-w-md">
+                <label class="label" for="terms-link-url">Link URL</label>
+                <input
+                    id="terms-link-url"
+                    type="url"
+                    class="input"
+                    placeholder="https://example.com/terms"
+                    autocomplete="off"
+                    x-model="url"
+                    x-on:keydown.enter.prevent="$dispatch('terms-insert-link-confirmed', { url })"
+                >
+                <p class="mt-1.5 text-xs text-ink-muted">
+                    Include the scheme, e.g. <span class="font-mono">https://example.com/terms</span>.
+                </p>
+
+                <x-slot:footer>
+                    <button type="button" class="btn-ghost" x-on:click="close()">Cancel</button>
+                    <button type="button" class="btn-primary" x-on:click="$dispatch('terms-insert-link-confirmed', { url })">
+                        Insert link
+                    </button>
+                </x-slot:footer>
+            </x-ui.dialog>
         </div>
     </form>
 @endsection
@@ -172,14 +243,45 @@
                     editor.innerHTML = this.html;
                     source.value = this.html;
                     this.ready = true;
+                },
 
-                    // The surface must never end up empty silently.
-                    this.$el.addEventListener('submit', () => {
-                        if (!editor.innerHTML.trim() && !source.value.trim()) {
-                            alert('Please enter the terms content before saving.');
-                            return;
-                        }
-                    });
+                /**
+                 * Refuse to save an empty policy.
+                 *
+                 * The surface must never end up empty silently — a published
+                 * policy with no text is a blank page for the customer — but the
+                 * refusal is now the modal below instead of `alert()`, and it
+                 * actually cancels the submission. The old version hung an
+                 * `alert()` on a `submit` listener and `return`ed from the
+                 * callback, which cannot cancel anything: `addEventListener`
+                 * ignores the return value, so the empty form posted anyway.
+                 */
+                guardSubmit(event) {
+                    if (this.$refs.editor.innerHTML.trim() || this.$refs.source.value.trim()) return;
+
+                    event.preventDefault();
+                    this.$dispatch('terms-content-empty');
+                },
+
+                /** Ask for a URL in the modal rather than in a `window.prompt()`. */
+                insertLink() {
+                    this.$dispatch('insert-link');
+                },
+
+                /**
+                 * Apply the URL the modal collected.
+                 *
+                 * Reached from the `terms-insert-link-confirmed` event the dialog
+                 * dispatches, so this owns the editor while the dialog owns only
+                 * the field. An empty or cancelled URL returns without touching
+                 * the selection, which is what `if (!url) return` did before.
+                 */
+                applyLink(url) {
+                    if (! url) return;
+
+                    this.$refs.editor.focus();
+                    document.execCommand('createLink', false, url);
+                    this.sync();
                 },
 
                 exec(command) {
@@ -192,16 +294,6 @@
                     if (!tag) return;
                     this.$refs.editor.focus();
                     document.execCommand('formatBlock', false, tag);
-                    this.sync();
-                },
-
-                insertLink() {
-                    const url = window.prompt('Link URL (https://…)');
-
-                    if (!url) return;
-
-                    this.$refs.editor.focus();
-                    document.execCommand('createLink', false, url);
                     this.sync();
                 },
 

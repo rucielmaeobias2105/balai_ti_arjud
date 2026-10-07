@@ -15,18 +15,62 @@ use App\Models\SalonSetting;
 use App\Notifications\AppointmentBookedNotification;
 use App\Support\PriceFormatter;
 use App\Support\SendsNotificationsQuietly;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 /**
  * Creates appointments from the booking form and keeps linked inventory in
  * step. Every write happens in a transaction so a failed availability re-check
  * cannot leave a half-written appointment behind.
+ *
+ * It is also the second half of the duplicate-submission guard. `POST /book` used
+ * to have no throttle and no duplicate check, and the availability re-check cannot
+ * stand in for one: it reads *before* the insert, so a double-tap that fired two
+ * requests saw the same slot free both times and both took it. The form now sends
+ * an idempotency key and `create()` treats a repeated key as the same attempt —
+ * see `resolveIdempotent()`.
  */
 class BookingService
 {
     use SendsNotificationsQuietly;
+
+    /**
+     * The appointment an idempotency key already produced, if any.
+     *
+     * Scoped by `user_id` as well as by the key, so a replayed key belonging to some
+     * other account resolves to nothing rather than handing back a stranger's
+     * booking. Null for a key that was never used.
+     */
+    public function resolveIdempotent(?string $key, ?int $userId): ?Appointment
+    {
+        if ($key === null || $key === '' || $userId === null) {
+            return null;
+        }
+
+        return Appointment::query()
+            ->where('user_id', $userId)
+            ->where('idempotency_key', $key)
+            ->first();
+    }
+
+    /**
+     * The key to store, or null when the request did not carry a usable one.
+     *
+     * Validated as a UUID rather than merely length-checked, because the value is
+     * written to a column behind a unique index: a client that could put arbitrary
+     * text there could also deliberately collide with somebody else's key. A
+     * request with no valid key simply gets none, which leaves the duplicate guard
+     * to the throttle rather than failing an otherwise fine booking.
+     */
+    protected function idempotencyKey(array $data): ?string
+    {
+        $key = $data['idempotency_key'] ?? null;
+
+        return is_string($key) && Str::isUuid($key) ? $key : null;
+    }
 
     /**
      * Resolve the selected service/variant pairs into priced lines.
@@ -111,10 +155,110 @@ class BookingService
     {
         $settings = SalonSetting::current();
         $total = $this->totalFor($lines);
+        $key = $this->idempotencyKey($data);
 
-        $appointment = DB::transaction(function () use ($data, $lines, $total, $settings, $userId) {
+        /*
+         * The fast path.
+         *
+         * Checked before the transaction as well as by the unique index inside it.
+         * The check is what makes a duplicate *cheap* — it returns the booking that
+         * already exists instead of starting work that is about to be thrown away —
+         * and the index is what makes it *correct*, because two requests can both be
+         * past this check before either commits.
+         */
+        if ($key !== null && $existing = $this->resolveIdempotent($key, $userId)) {
+            return $existing->load('serviceLines');
+        }
+
+        try {
+            $appointment = $this->write($data, $lines, $userId, $key, $settings, $total);
+        } catch (QueryException $exception) {
+            /*
+             * The index refused the insert, which means a concurrent request with
+             * the same key won the race and committed first. Its booking is the one
+             * this customer wanted, so it is returned.
+             *
+             * Guarded on the key being present and on the error actually being the
+             * unique violation: any other database failure has to keep propagating,
+             * because swallowing it and returning somebody else's row would turn a
+             * real fault into a booking that looks fine.
+             */
+            if ($key === null || ! $this->isDuplicateKeyViolation($exception)) {
+                throw $exception;
+            }
+
+            $existing = $this->resolveIdempotent($key, $userId);
+
+            if (! $existing) {
+                throw $exception;
+            }
+
+            return $existing->load('serviceLines');
+        }
+
+        if ($userId) {
+            /*
+             * Quietly, because by this line the booking exists.
+             *
+             * The transaction has committed, the inventory is decremented and the
+             * customer is being redirected to a success page. A confirmation email
+             * that cannot be sent — a wrong SMTP password, a Gmail outage — must
+             * not turn all of that into a 500. If it did, the customer would see a
+             * failed booking that is in fact saved, submit again, and book the same
+             * slot twice; and the operator would be reading a mail credential error
+             * reported as a booking form fault.
+             *
+             * The duplicate path above deliberately sends nothing: the winner of the
+             * race already emailed this customer about this booking.
+             */
+            $this->notifyQuietly(
+                $appointment->user,
+                new AppointmentBookedNotification($appointment),
+                'booking confirmation',
+            );
+        }
+
+        return $appointment;
+    }
+
+    /**
+     * Is this the unique index on (user_id, idempotency_key) complaining?
+     *
+     * MySQL reports it as 23000/1062 and SQLite as 23000/19. Both codes are
+     * accepted, and neither is checked for the index name, because the driver
+     * message formats differ far more than the SQLSTATE does and matching on prose
+     * would make this quietly stop working on whichever database the salon moves to.
+     */
+    protected function isDuplicateKeyViolation(QueryException $exception): bool
+    {
+        $sqlState = $exception->getCode();
+
+        if ((string) $sqlState !== '23000' && (string) $sqlState !== '23505') {
+            return false;
+        }
+
+        $driverCode = $exception->errorInfo[1] ?? null;
+
+        return in_array((int) $driverCode, [19, 1062, 1555], true);
+    }
+
+    /**
+     * The insert itself, in its own transaction.
+     *
+     * Split out of `create()` so the duplicate handling wraps only the write. The
+     * notification deliberately sits outside this method — a notification sent from
+     * inside a transaction that then rolls back would tell a customer their booking
+     * exists when it does not.
+     *
+     * @param  array<string, mixed>  $data
+     * @param  array<int, array{service: Service, variant: ?ServiceVariant, quantity: int, price: float, display_price: string, duration: int}>  $lines
+     */
+    protected function write(array $data, array $lines, ?int $userId, ?string $key, SalonSetting $settings, float $total): Appointment
+    {
+        $appointment = DB::transaction(function () use ($data, $lines, $total, $settings, $userId, $key) {
             $appointment = Appointment::create([
                 'reference_number' => Appointment::generateReferenceNumber(),
+                'idempotency_key' => $key,
                 'user_id' => $userId,
                 'customer_name' => $data['customer_name'],
                 'customer_phone' => $data['customer_phone'],
@@ -168,32 +312,7 @@ class BookingService
             return $appointment;
         });
 
-        $appointment->load('serviceLines');
-
-        if ($userId) {
-            /*
-             * Quietly, because by this line the booking exists.
-             *
-             * The transaction has committed, the inventory is decremented and the
-             * customer is being redirected to a success page. A confirmation
-             * email that cannot be sent — a wrong SMTP password, a Gmail outage —
-             * must not turn all of that into a 500. If it did, the customer would
-             * see a failed booking that is in fact saved, submit again, and book
-             * the same slot twice; and the operator would be reading a mail
-             * credential error reported as a booking form fault.
-             *
-             * `notifyQuietly()` logs the failure and reports it. The booking is
-             * not rolled back and the customer is not told their booking failed,
-             * because it did not.
-             */
-            $this->notifyQuietly(
-                $appointment->user,
-                new AppointmentBookedNotification($appointment),
-                'booking confirmation',
-            );
-        }
-
-        return $appointment;
+        return $appointment->load('serviceLines');
     }
 
     /**

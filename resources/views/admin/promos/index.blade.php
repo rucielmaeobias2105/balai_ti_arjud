@@ -75,7 +75,8 @@
                                     icon="heroicon-o-trash"
                                     tone="danger"
                                     :action="route('admin.promos.destroy', $promo)"
-                                    :confirm="'Delete “'.$promo->title.'”?'"
+                                    :confirm="$promo->title"
+                                    confirm-event="confirm-delete-promo"
                                 />
                             </div>
                         </td>
@@ -97,4 +98,13 @@
             </tbody>
         </table>
     </x-ui.admin-table>
+
+    <x-ui.confirm-dialog
+        title="Delete this promo?"
+        event="confirm-delete-promo"
+        verb="Delete"
+        subject="promo"
+        confirm-label="Yes, delete it"
+        cancel-label="Cancel"
+    />
 @endsection

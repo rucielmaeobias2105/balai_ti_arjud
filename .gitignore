@@ -2,7 +2,17 @@
 /node_modules
 /public/build
 /public/hot
-/public/storage
+# The uploads directory is served directly (see the `public` disk in
+# config/filesystems.php), so the folders themselves must exist in a fresh
+# checkout or an upload has nowhere to go and every image 404s.
+#
+# The folders are committed; what goes in them is not. Each one carries its own
+# .gitignore, which is what makes that possible: git cannot track an empty
+# directory, so without a placeholder file there would be nothing to check out.
+/public/storage/*
+!/public/storage/.gitignore
+!/public/storage/*/
+!/public/storage/*/.gitignore
 # Generated CSV exports. The report feature streams these to the browser rather
 # than writing them to disk, so anything here is a leftover from an older
 # implementation — and because the directory sits under /public it is web
@@ -31,3 +41,11 @@ yarn-error.log
 /storage/dev-supervisor.pid
 /storage/dev-supervisor.stop
 /storage/dev-server.ready
+
+# Local backups taken by hand before editing opencode's own config. These carry
+# a full node_modules copy (52 MB), so committing one would put that weight in
+# the history permanently — git keeps a blob forever, even after the file is
+# deleted again.
+# Only the live config is tracked; a backup of it is a local artefact.
+/.opencode.bak/
+/opencode.json.bak

@@ -20,7 +20,19 @@
                          band on mobile. An offer with no picture gets the
                          flourish, which is what the whole media block was
                          before photos existed — so "none yet" still looks
-                         deliberate rather than broken. --}}
+                         deliberate rather than broken.
+
+                         The card carries no height of its own: the picture is a
+                         fixed-size column and the text beside it decides how
+                         tall the card is. That is what lets a multi-paragraph
+                         offer be read in full instead of being squeezed into
+                         whatever a fixed box left over — and the clamp that used
+                         to hide the overflow is gone with it.
+
+                         Everything else is where it was. The badge still sits on
+                         the picture, the title and description still head the
+                         text column, and the validity range and Book Now are
+                         still its last row. --}}
                     <article class="home-promo-card">
                         <div class="home-promo-media">
                             @if ($offer->hasImage())

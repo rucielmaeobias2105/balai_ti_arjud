@@ -37,7 +37,7 @@ return [
     | It is here now so the wording is config rather than another string living
     | in a view — the same reason the contact facts above are.
     */
-    'tagline' => 'Where beauty meets hospitality. Book your services online and let our therapists pamper you — from glow manicures and lash extensions to relaxing massage and spa packages in the heart of Abra.',
+    'tagline' => 'Where beauty meets hospitality. Book your services online and let our therapists pamper you.',
 
     'address' => 'Unit 4, 2 wins Bldg. Abra Kalinga Rd. Patucannay, Tayum, Abra',
 

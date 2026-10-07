@@ -1,0 +1,3 @@
+# Uploaded files in this directory are ignored; the directory itself is not.
+# See the `public` disk in config/filesystems.php — this folder is what the
+# web server serves, so it has to exist after a fresh clone.

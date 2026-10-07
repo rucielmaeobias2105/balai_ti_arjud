@@ -167,18 +167,19 @@
                                     </td>
 
                                     <td>
-                                        {{-- View, Cancel, Reschedule and Delete
+                                        {{-- View, Cancel, Reschedule, Delete and Book Again
                                              are the same square icon in the same
                                              neutral/danger/informational set.
                                              Cancel and Reschedule are gated on
                                              `isCustomerActionable()` (Pending and
                                              Confirmed); Delete is gated on the
-                                             booking being settled. A live booking
-                                             therefore shows view, cancel and
-                                             reschedule, and a finished one shows
-                                             view and delete — never both sets at
-                                             once, which is what keeps the cell
-                                             from growing a fifth square. --}}
+                                             booking being settled; Book Again only
+                                             on Completed. A live booking therefore
+                                             shows view, cancel and reschedule; a
+                                             finished one shows view, book again and
+                                             delete — never both sets at once,
+                                             which is what keeps the cell from
+                                             growing a fifth square. --}}
                                         <div class="flex items-center justify-center gap-1.5">
                                             <button
                                                 type="button"
@@ -189,6 +190,24 @@
                                             >
                                                 <i class="fas fa-eye" aria-hidden="true"></i>
                                             </button>
+
+                                            {{-- Repeat a finished visit. A plain link
+                                                 rather than a dialog: the destination
+                                                 is the ordinary booking form with
+                                                 the basket pre-filled, and the
+                                                 customer still has to pick a date,
+                                                 a time and confirm. Nothing is
+                                                 submitted on the way there. --}}
+                                            @if ($appointment->status === \App\Enums\AppointmentStatus::Completed)
+                                                <a
+                                                    class="icon-action icon-action-primary"
+                                                    href="{{ route('appointments.book-again', $appointment) }}"
+                                                    title="Book {{ $appointment->reference_number }} again"
+                                                    aria-label="Book {{ $appointment->reference_number }} again"
+                                                >
+                                                    <i class="fas fa-repeat" aria-hidden="true"></i>
+                                                </a>
+                                            @endif
 
                                             @if ($appointment->canBeCancelled())
                                                 <button
@@ -298,7 +317,10 @@
          dialog reads its content out of the payload rather than out of the
          markup — one dialog serves every row, and a row's own data is what
          shows. --}}
-    <div x-data="appointmentViewer(@js($viewRows), @js($openView))" x-on:view-appointment.window="show($event.detail)">
+    <div
+        x-data="appointmentViewer(@js($viewRows), @js($openView), @js(route('appointments.book-again', ['appointment' => '__ID__'])))"
+        x-on:view-appointment.window="show($event.detail)"
+    >
         <x-ui.dialog title="Appointment Details" icon="heroicon-o-clipboard-document-list" max-width="max-w-3xl" title-id="view-appointment-title">
             <div class="grid gap-6 sm:grid-cols-2">
                 {{-- LEFT — who booked it, and when. --}}
@@ -417,8 +439,27 @@
                         <li class="flex items-start justify-between gap-3 rounded-xl bg-linen/60 px-4 py-3">
                             <div class="min-w-0">
                                 <p class="text-sm font-medium text-ink" x-text="service.name"></p>
+                                {{-- The quantity, and only the quantity.
+
+                                     This line read `service.quantity + ' × ' +
+                                     service.duration + ' min'`, which printed
+                                     "1 × 0 min" on almost every booking: the
+                                     durations these lines carry are 0 because the
+                                     column was never filled in, and "0 min" is a
+                                     claim that a treatment takes no time rather
+                                     than an admission that the figure is missing.
+                                     The same reasoning is why Service's
+                                     `duration_label` returns empty instead of
+                                     "0 min" — see app/Models/Service.php.
+
+                                     So the duration is gone rather than
+                                     conditional. A booking made after the
+                                     salon starts recording durations would want
+                                     it back, and it should come back as real
+                                     data in this payload, not as a zero that has
+                                     to be hidden at the last moment. --}}
                                 <p class="text-xs text-ink-muted">
-                                    <span x-text="service.quantity + ' × ' + service.duration + ' min'"></span>
+                                    <span x-text="'× ' + service.quantity"></span>
                                 </p>
                             </div>
                             <p class="shrink-0 text-sm font-semibold text-primary">
@@ -433,27 +474,32 @@
                 </p>
             </section>
 
-            {{-- Status history: the last few transitions, as a footnote. The
-                 standalone page carried the whole timeline in a sidebar; inside
-                 a dialog that is a wall of text that pushes the footer off a
-                 phone screen, so the payload caps it and this is compact. --}}
-            <section class="mt-6 border-t border-line/70 pt-5" x-show="(detail?.statusHistory ?? []).length > 0" x-cloak>
-                <h3 class="text-xs font-semibold uppercase tracking-wider text-ink-muted">Status History</h3>
 
-                <ol class="mt-3 space-y-2">
-                    <template x-for="entry in (detail?.statusHistory ?? [])" x-bind:key="entry.at + entry.label">
-                        <li class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs">
-                            <span class="font-semibold text-primary" x-text="entry.label"></span>
-                            <span class="text-ink-muted" x-text="entry.at"></span>
-                            <span class="text-ink-muted/70" x-text="'by ' + entry.actor"></span>
-                            <span class="w-full italic text-ink-muted" x-show="entry.note" x-text="entry.note"></span>
-                        </li>
-                    </template>
-                </ol>
-            </section>
 
             <x-slot:footer>
                 <button type="button" class="btn-ghost" x-on:click="close()">Close</button>
+
+                {{-- Book Again, for a finished visit only.
+                     The same action as the icon in the Actions column, offered here
+                     too because the details dialog is where a customer lands after
+                     clicking View on a past booking and the next thing they want is
+                     another one.
+
+                     The href is built from `detail`, not from the row: the dialog
+                     can be opened for a booking that is not on the current page of
+                     results (the `?view=ID` fallback), so a row-derived URL would
+                     point at the wrong visit. `bookAgainUrl` is null for anything
+                     that is not Completed, and the button is hidden off that rather
+                     than rendered as a link to a 403. --}}
+                <a
+                    x-show="bookAgainUrl"
+                    x-cloak
+                    class="btn-primary"
+                    x-bind:href="bookAgainUrl"
+                >
+                    <i class="fas fa-repeat" aria-hidden="true"></i>
+                    Book Again
+                </a>
             </x-slot:footer>
         </x-ui.dialog>
     </div>

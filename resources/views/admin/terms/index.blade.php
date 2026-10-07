@@ -6,15 +6,44 @@
 @section('content')
 
     {{--
-        The reference admin terms screen is one card per policy, each with a
-        textarea and a Save button, all on the index. BTA reproduces that
-        structure: one editor per category, saved straight from this page.
+        One card per policy, each with a textarea and a Save button, saved
+        straight from this page.
 
-        A category owns exactly one row. Saving overwrites it in place — there is
-        no version history — and the "Publish this policy" checkbox decides
-        whether customers see it. The checkbox defaults to ticked, live or not,
-        so re-saving a live policy cannot silently unpublish it; un-ticking it
-        and saving is how an admin deliberately takes a policy down.
+        A category owns exactly one row, and there is no version history: this
+        page edits the text, and a separate "Publish to customers" action decides
+        whether customers see it.
+
+        WHAT IS NOT ON THIS PAGE
+
+          - No Preview pill. It was a link to the shared Terms dialog, offered
+            only when something was published, so the two halves of the page
+            disagreed: with nothing published there was no way to see what a
+            customer would get, and with something published the only way to
+            check it sat next to a status badge saying so. Reading the text in
+            the textarea is the same text; `/terms/{category}` is the page a
+            customer lands on, and both are one click away from anywhere else in
+            the application.
+
+          - No Live / Not published pill. A badge that restates what the
+            Publish button already implies — the button reads "Publish to
+            customers" on an unpublished policy and is replaced by the date the
+            policy went live on a published one. Two controls saying the same
+            fact is two things to keep in step when one of them changes.
+
+          - No version counter. There is no version to count: the `version`
+            column was dropped when saving stopped appending rows, and the
+            de-duplicating migration collapsed the superseded rows that had
+            accumulated. What is true instead is stated as a date, because "live
+            since 4 Oct" is the question an admin is actually asking.
+
+        WHY PUBLISH IS A BUTTON AND NOT A TICK BOX
+
+        The checkbox was on the Save form, so "I have edited the text" and "I
+        have decided the public should now read this" were one gesture. They are
+        not the same gesture, and on a page that overwrites in place the
+        difference is the whole point: saving an edit to a live policy used to
+        post `is_published` as false and quietly take it down. Save now writes
+        the text and leaves publication alone; Publish is pressed on purpose.
     --}}
     <div class="grid gap-6 xl:grid-cols-2">
         @foreach (\App\Enums\TermsCategory::cases() as $category)
@@ -25,29 +54,15 @@
 
             <x-ui.card :title="$category->label().' Terms'">
                 <x-slot:actions>
-                    {{-- Preview, for a policy that has a live row at all.
-
-                         This used to live in the version history list, once per
-                         version row. With that list gone there would be no way to
-                         see the customer-facing rendering at all, and the raw
-                         textarea above is not it — what a customer reads is the
-                         published row put through the terms dialog, with its
-                         numbered list and styling.
-
-                         So it sits on the card, once, and only where there is
-                         something published to preview. It dispatches the shared
-                         dialog rather than linking out, so an admin checks the
-                         text without leaving the screen they are editing on. --}}
-                    @if ($live)
-                        <x-terms.link :category="$category" class="btn-ghost btn-sm no-underline">
-                            Preview
-                        </x-terms.link>
-                    @endif
-
-                    @if ($live)
-                        <x-ui.badge status="completed" label="Live" />
-                    @else
-                        <x-ui.badge status="cancelled" label="Not published" />
+                    {{-- The date the customer-facing text last went live, as
+                         plain text rather than a status pill. On an unpublished
+                         policy the slot is empty and the action below says what
+                         can be done instead. --}}
+                    @if ($live?->published_at)
+                        <p class="text-right text-xs leading-tight text-ink-muted">
+                            Live to customers<br>
+                            <span class="font-medium text-primary">{{ $live->published_at->format('M j, Y g:i A') }}</span>
+                        </p>
                     @endif
                 </x-slot:actions>
 
@@ -65,22 +80,58 @@
                         />
 
                         <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
-                            {{-- Always ticked by default. It used to default to
-                                 unticked for a policy that was already live, on
-                                 the reasoning that this "cannot silently
-                                 unpublish" it — which had the opposite effect:
-                                 the common case, editing a live policy's text,
-                                 demoted it on every save. Un-ticking and saving
-                                 is now the deliberate way to take one down. --}}
-                            <x-ui.form.checkbox
-                                name="is_published"
-                                value="1"
-                                label="Publish this policy (show it to customers)"
-                            />
+                            <button type="submit" class="btn-secondary">Save</button>
 
-                            <button type="submit" class="btn-primary btn-sm">Save</button>
+                            {{-- Publish to customers.
+
+                                 A real CSRF-protected POST to
+                                 `admin.terms.publish`, not a link and not a
+                                 script call: publishing changes what the public
+                                 reads, so it goes through the same route as
+                                 everything else that changes data, and there is
+                                 exactly one of them.
+
+                                 The button carries `form="…"` pointing at the
+                                 hidden form below rather than nesting one form
+                                 inside the Save form, which is not valid HTML —
+                                 a browser silently drops the inner `<form>` and
+                                 its CSRF token with it, and the publish either
+                                 does nothing or posts without one.
+
+                                 Absent for a policy with no row, because there
+                                 is nothing to publish: the note in its place
+                                 says what to do first. On a live policy the
+                                 button is inert and says so, and the date in the
+                                 card header is the record — publishing again
+                                 after an edit is deliberately how an admin says
+                                 "this revised text is now the live text". --}}
+                            @if ($row)
+                                <button
+                                    type="submit"
+                                    class="{{ $live ? 'btn-ghost' : 'btn-primary' }}"
+                                    form="publish-terms-{{ $row->id }}"
+                                    @disabled((bool) $live)
+                                >
+                                    {{ $live ? 'Already published' : 'Publish to customers' }}
+                                </button>
+                            @else
+                                <p class="text-xs text-ink-muted">
+                                    Save the text above first, then publish it to customers.
+                                </p>
+                            @endif
                         </div>
                     </form>
+
+                    @if ($row)
+                        <form
+                            method="POST"
+                            action="{{ route('admin.terms.publish', $row) }}"
+                            id="publish-terms-{{ $row->id }}"
+                            class="hidden"
+                        >
+                            @csrf
+                        </form>
+                    @endif
                 @else
                     <div class="prose-bta max-w-none text-sm leading-relaxed text-ink">
                         @if ($row)

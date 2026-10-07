@@ -37,7 +37,30 @@
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     @stack('head')
 </head>
-<body class="min-h-full">
+<body
+    {{--
+        `x-data` on the body is load-bearing, and it is here because Alpine does
+        not do what everyone assumes it does.
+
+        `Alpine.start()` initialises the elements that match `[x-data]` and walks
+        their subtrees. It does NOT walk from `<body>`. A directive that is not
+        inside some `x-data` element is therefore never initialised at all — no
+        error, no warning, the attribute simply sits there doing nothing.
+
+        That is why the registration form's "Terms and Conditions" link was
+        inert. It carried `x-on:click.prevent` to open the terms dialog, but the
+        link sits inside `<form>`, which has no `x-data`, and neither does any
+        ancestor up to the body — the only roots on this page were the phone
+        field's own `x-data` and the dialog's. So `preventDefault` was never
+        bound, the click followed the real `href`, and the customer was dropped
+        on the standalone `/terms/booking` page instead of getting a dialog.
+
+        A root here means every directive on the page is inside a tree, whether
+        or not the page that owns it remembers to add its own.
+    --}}
+    x-data
+    class="min-h-full"
+>
     {{--
         One two-panel auth shell for every sign-in surface: customer login,
         register and password recovery, plus the staff portal login.
@@ -81,7 +104,7 @@
                 />
 
                 <h2 class="admin-auth-name">Balai ti Arjud</h2>
-                <p class="admin-auth-sub">Glow &amp; Co. Beauty Lounge</p>
+                <p class="admin-auth-sub">Glow & Co. Beauty Lounge</p>
 
                 <span class="admin-auth-divider" aria-hidden="true"></span>
 
@@ -121,6 +144,21 @@
             </div>
         </main>
     </div>
+
+    {{--
+        The Terms & Conditions dialog, for the same reason the customer and admin
+        layouts mount it: the triggers are scattered and a dialog added page by
+        page is a dialog one of them ends up without.
+
+        It was missing here, and that made the registration page's terms link
+        inert. `x-terms.link` is a real `<a>` whose `href` is intercepted by
+        Alpine to open this dialog — so with no dialog mounted, the
+        `preventDefault` fired, nothing opened, and the only way to read the
+        terms from the sign-up form was gone. Mounting it here is what makes
+        "I agree to the Terms and Conditions" a statement the customer can
+        actually check.
+    --}}
+    <x-terms.modal />
 
     @stack('scripts')
 </body>

@@ -1,61 +1,193 @@
 # Balai ti Arjud — Online Appointment & Inventory Management System
 
-A production-ready web application for **Balai ti Arjud — Glow & Co. Beauty Lounge**, a
-salon/spa offering online appointment booking plus inventory, staff, review, promo and
-reporting management.
+**Balai ti Arjud — Glow & Co. Beauty Lounge** is a salon management web application built
+on Laravel 11. It serves two audiences from one codebase: **customers**, who browse the
+service catalogue and book, reschedule or cancel appointments at a beauty lounge, and the
+**salon's staff**, who run the business from a separate admin portal — working the
+appointment queue, maintaining the service catalogue, technicians and stock, publishing
+terms, promos and reports.
 
-Built with **Laravel 11 (LTS)**, **MySQL**, **Blade + Tailwind CSS 3** and **Alpine.js**.
+The project was built as a full-stack capstone: a real schema, a real booking engine with
+server-side availability rules, two isolated authentication guards, a Blade component
+design system, and an end-to-end feature test suite covering both sides of the app.
 
 ---
 
 ## Table of contents
 
-- [Requirements](#requirements)
-- [Setup](#setup)
-- [Demo accounts](#demo-accounts)
+- [Features](#features)
+- [Technology stack](#technology-stack)
+- [Getting started](#getting-started)
+- [Demo credentials](#demo-credentials)
 - [Running the app](#running-the-app)
-- [Running the tests](#running-the-tests)
-- [Feature map](#feature-map)
-- [Architecture](#architecture)
-- [Design system](#design-system)
+- [Project structure](#project-structure)
+- [How the booking rules work](#how-the-booking-rules-work)
+- [Salon operating rules](#salon-operating-rules)
 - [Data model](#data-model)
-- [Key behaviours](#key-behaviours)
+- [Tests](#tests)
+- [Design system](#design-system)
+- [Artisan commands](#artisan-commands)
+- [Deployment notes](#deployment-notes)
 - [Prompt logging](#prompt-logging)
-- [Environment notes](#environment-notes)
 
 ---
 
-## Requirements
+## Features
+
+### Customer-facing
+
+| Feature | Route |
+| --- | --- |
+| Landing page (hero, featured services, gallery, promos, CTA) | `GET /` |
+| About page | `GET /about` |
+| Service catalogue with category / search / price filtering | `GET /services` |
+| Service detail page with variants and live availability | `GET /services/{service}` |
+| Category-filtered grid view | `GET /services-grid` |
+| Promos & special offers | `GET /promos` |
+| Contact form (name, email, topic, message) — rate limited | `GET/POST /contact` |
+| Published Terms & Conditions, by category | `GET /terms/{category}` |
+| Registration | `GET/POST /register` |
+| Login with **username or email** — rate limited | `GET/POST /login` |
+| Four-step password reset (email → 6-digit code → new password) | `GET/POST /password`, `/password/code`, `/password/reset` |
+| **Multi-step booking flow** (see below) | `GET/POST /book` |
+| Live slot lookup feeding the booking date picker (public) | `GET /book/slots` |
+| My Appointments — status filter, view dialog, bulk clear | `GET /appointments` |
+| Book Again from a completed booking | `GET /appointments/{id}/book-again` |
+| Cancel an appointment (reason + policy acknowledgement) | `GET/PATCH /appointments/{id}/cancel` |
+| Reschedule an appointment (re-validated slot) | `GET/PATCH /appointments/{id}/reschedule` |
+| Notifications — unread badge, polled feed, mark read / read all, delete | `GET /notifications`, `/notifications/feed` |
+| Profile management — details, optional password change, photo upload with client-side cropping | `GET/PATCH /profile`, `DELETE /profile/photo` |
+
+The booking form is a **four-step wizard on a single page**:
+
+1. **Selected Service** — one or more services, each with its variant (e.g. short / medium /
+   long hair pricing) and quantity.
+2. **Your Details & Preferred Date & Time** — name, phone, date and time. Mondays and
+   out-of-hours dates are greyed out from the same rules the server enforces.
+3. **Preferences & Health Notes** — allergies and health notes.
+4. **Last Service(s) Availed, Technician & Special Request** — previous treatments, an
+   optional technician from the active roster, a special request, and the Terms & Conditions
+   acceptance checkbox.
+
+The confirmation screen summarises the basket with snapshotted prices before anything is
+written. Submission is rate limited per account and carries an idempotency key, so a
+double-tap on a slow connection cannot create two bookings.
+
+### Admin-facing (`/admin`, separate guard and session)
+
+| Feature | Route |
+| --- | --- |
+| Staff login + password reset | `GET/POST /admin/login`, `/admin/password/*` |
+| Dashboard — stat cards, 14-day revenue chart, status breakdown, upcoming queue | `GET /admin` |
+| Appointment management — full list, detail, edit | `GET /admin/appointments` |
+| Appointment **status workflow** with guarded transitions | `PATCH /admin/appointments/{id}/status` |
+| Internal admin notes (never shown to the customer) | `PATCH /admin/appointments/{id}/notes` |
+| Down-payment reference verification | `PATCH /admin/appointments/{id}/down-payment` |
+| Archive / restore / permanent delete (settled bookings only) | `/admin/appointments/{id}/archive`, `/restore`, `DELETE` |
+| Archived appointments screen with bulk restore | `GET /admin/appointments-archived` |
+| Live row-state polling so status changes appear without a reload | `GET /admin/appointments-row-state` |
+| Catalogue overview (services + items in one place) | `GET /admin/catalog` |
+| Service management — CRUD, availability toggle, variants | `GET /admin/services` |
+| Service categories — CRUD, active toggle, per-category calendar colour | `GET /admin/categories` |
+| Technician roster — CRUD, active toggle | `GET /admin/technicians` |
+| Inventory / items — CRUD, linked services, stock levels | `GET /admin/inventory` |
+| Stock tagging — Available / Low Stock / Best Seller / Sold Out, single and bulk | `GET /admin/tags` |
+| Calendar with **blocked slots** (whole day or a time range) | `GET /admin/calendar` |
+| Registered users — list, detail, delete (anonymising) | `GET /admin/users` |
+| Terms & Conditions editor — draft, publish, delete, per category | `GET /admin/terms` |
+| Sales / usage reports with CSV export | `GET /admin/reports`, `/admin/reports/export` |
+| Inventory CSV export | `GET /admin/inventory/export` |
+| Promo management + push announcement to customers | `GET /admin/promos`, `POST /admin/promos/{id}/announce` |
+| Contact messages inbox | `GET /admin/messages` |
+| Admin profile | `GET/PATCH /admin/profile` |
+| Live notification bell (polled feed + mark read) | `GET /admin/notifications/feed` |
+
+Every admin screen is gated by an ability from `App\Enums\AdminRole::abilities()`, enforced
+in two places: `admin.role:admin.<ability>` middleware on the route, and `@can(...)` in the
+view, so a control is never shown to a role the server would reject anyway.
+
+### Appointment status workflow
+
+Statuses live in `App\Enums\AppointmentStatus` as `pending`, `confirmed`, `in_progress`,
+`completed`, `cancelled`. Each status declares the transitions it allows, and that same table
+drives both the admin dropdown and the server-side check, so a hand-crafted transition that
+is not on the menu is refused. `completed` is terminal — reopening a finished booking would
+rewrite history, so the recovery path is a database correction rather than a UI button.
+
+---
+
+## Technology stack
+
+Read from `composer.json`, `package.json` and the code — nothing inferred.
+
+**Backend**
+
+- **PHP 8.2+**, **Laravel 11** (`laravel/framework ^11.31`), Laravel Tinker
+- **Blade** templating with a project component library (`resources/views/components/`)
+- **Eloquent** with 16 models, backed PHP enums for every status/tag field, custom casts
+  (`TolerantEnum`) and a `NormalizesEnumValues` contract
+- **Laravel Notifications** on the database channel — 13 notification classes covering
+  welcome, booking, confirmation, in-progress, completion, cancellation (by customer and by
+  admin), reschedule, reminder, password-reset code, promo announcement and admin reset
+- **Form Requests** for every write path (`app/Http/Requests/{Auth,Admin,Customer}`)
+- **Rate limiting** on every write route, including a named `booking` limiter
+  (12/min per account) defined in `AppServiceProvider`
+- **Mail** over SMTP. `.env.example` is configured for Gmail SMTP on port 587 with a Google
+  App Password, and documents Mailtrap as a local sandbox
+- Session, cache and queue all on the **database** driver; sessions are encrypted at rest
+- **Blade Heroicons** (`blade-ui-kit/blade-heroicons ^2.7`) for iconography
+- PHPUnit 11, Mockery, Faker, Laravel Pint
+
+**Frontend**
+
+- **Tailwind CSS 3** on Vite, with the design tokens wired through `tailwind.config.js`
+- **Alpine.js 3** for all interactivity — the booking wizard, dialogs, dropdowns, toasts,
+  the live slot picker and the profile-photo cropper. Server-rendered HTML stays the source
+  of truth; Alpine only mirrors state
+- **Cropper.js 1.6.2**, vendored at `public/vendor/cropper/` (no CDN dependency), used for
+  1:1 profile-photo cropping before upload
+- **FontAwesome Free 7** for the icon set, Playfair Display / Cormorant Garamond / Parisienne
+  / Poppins for type
+- Vite 6, `laravel-vite-plugin`, PostCSS, Autoprefixer, concurrently
+
+**Database**
+
+- **MySQL** (MariaDB 10.4+ works). `php artisan test` defaults to in-memory SQLite so the suite
+  needs no database server; see [Tests](#tests)
+
+---
+
+## Getting started
+
+### Requirements
 
 | Tool | Version |
 | --- | --- |
-| PHP | 8.2+ (tested on 8.3) with `pdo_mysql`, `mbstring`, `openssl`, `fileinfo`, `gd` |
+| PHP | 8.2+ with `pdo_mysql`, `mbstring`, `openssl`, `fileinfo`, `gd` |
 | Composer | 2.x |
-| MySQL | 5.7+ / 8.x (MariaDB 10.4+ works) |
-| Node.js | 18+ (tested on 24) |
+| MySQL | 5.7+ / 8.x (MariaDB 10.4+) |
+| Node.js | 18+ |
 | npm | 9+ |
 
----
-
-## Setup
+### Installation
 
 ```bash
-# 1. Install PHP dependencies
+# 1. PHP dependencies
 composer install
 
-# 2. Install frontend dependencies
+# 2. Frontend dependencies
 npm install
 
-# 3. Create the environment file
-cp .env.example .env
+# 3. Environment file
+cp .env.example .env          # Windows: copy .env.example .env
 
-# 4. Generate an application key
+# 4. Application key
 php artisan key:generate
 
-# 5. Create the database (MySQL)
+# 5. Create the database
 mysql -u root -e "CREATE DATABASE bta CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 
-# 6. Point .env at your database
+# 6. Point .env at it (defaults already match the command above)
 #    DB_CONNECTION=mysql
 #    DB_HOST=127.0.0.1
 #    DB_PORT=3306
@@ -63,537 +195,418 @@ mysql -u root -e "CREATE DATABASE bta CHARACTER SET utf8mb4 COLLATE utf8mb4_unic
 #    DB_USERNAME=root
 #    DB_PASSWORD=
 
-# 7. Create the schema and load demo data
+# 7. Schema + demo data
 php artisan migrate --seed
 
-# 8. Expose uploaded files (profile photos, service photos, promo images)
-php artisan storage:link
-
-# 9. Build the frontend assets
+# 8. Build assets
 npm run build
 ```
 
-For local development with hot reloading, run `npm run dev` in a second terminal
-instead of `npm run build`.
+For development with hot reloading, run `npm run dev` in a second terminal instead of
+`npm run build`.
 
-> **XAMPP users:** MySQL runs on port `3306` by default and the root password is
-> usually empty — that is what `.env.example` ships with.
+### There is no `storage:link` step — and that is deliberate
+
+Uploads are written straight into `public/storage`, which is the `public` disk root in
+`config/filesystems.php` and the directory the web server serves. There is no symlink, so
+nothing breaks on shared hosting where `storage:link` is unavailable or a symlink cannot
+survive an FTP upload. Each upload folder carries a committed placeholder so a fresh clone
+still has the directory, with uploads themselves git-ignored.
+
+If an older installation ran `storage:link` before this change, copy the files across once:
+
+```bash
+cp -r storage/app/public/* public/storage/
+```
+
+### What the seeders create
+
+`php artisan migrate --seed` runs, in order:
+
+| Seeder | Creates |
+| --- | --- |
+| `AdminSeeder` | The single staff account, and the `salon_settings` singleton row |
+| `ServiceSeeder` | 42 services across 13 categories, with 24 pricing variants (short / medium / long hair and similar) |
+| `UserSeeder` | One developer customer account |
+| `AppointmentSeeder` | 15 planned appointments across every status, attached to whichever active customer accounts exist |
+| `TermsSeeder` | Booking, Cancellation and Rescheduling terms, published |
+| `ContentSeeder` | 3 promos (active, upcoming, expired) and 3 contact messages |
+
+**Inventory is deliberately not seeded.** Stock is what the salon actually holds, so demo rows
+would misrepresent it and sit at the top of every low-stock count. Add real items from
+Admin → Inventory. `php artisan inventory:clear` removes rows a previous seed left behind.
+
+`AppointmentSeeder` looks its customers up by email and skips any it cannot find, so on a
+freshly seeded database it attaches bookings to the developer account and simply skips the
+rest rather than failing.
 
 ---
 
-## Demo accounts
+## Demo credentials
 
-`php artisan migrate --seed` creates a fully populated demo environment.
+Seeded by `AdminSeeder` and `UserSeeder`. These are development credentials — change or
+remove them before deploying anywhere public.
 
-### Admin (staff portal — `/admin/login`)
+### Staff / admin — `/admin/login`
 
-| Username | Email | Password | Role |
-| --- | --- | --- | --- |
-| `admin` | admin@balaitiarjud.test | `password` | Super Admin |
-| `manager` | manager@balaitiarjud.test | `password` | Manager |
-| `jade` | jade@balaitiarjud.test | `password` | Staff / therapist |
-| `marco` | marco@balaitiarjud.test | `password` | Staff / therapist |
-| `aling` | aling@balaitiarjud.test | `password` | Staff / therapist |
+| Field | Value |
+| --- | --- |
+| Username | `admin` |
+| Email | `admin@balaitiarjud.test` |
+| Password | `password` |
 
-### Customers
+There is one admin account and no tiers. The seeder force-deletes any other admin row so a
+re-seed cannot quietly re-introduce them.
 
-| Email | Password | Notes |
-| --- | --- | --- |
-| juan@example.test | `password` | Active account with booking history |
-| maria@example.test | `password` | Active account |
-| angeline@example.test | `password` | Active account |
-| paolo@example.test | `password` | Active account |
-| kristine@example.test | `password` | Active account |
-| diego@example.test | `password` | Active account |
-| inactive@example.test | `password` | **Deactivated** — demonstrates the admin deactivate flow |
+### Customer
 
-Customers can sign in with either their **email or username** (e.g. `juan`).
+| Field | Value |
+| --- | --- |
+| Email | `rucielmaeobias277@gmail.com` |
+| Username | `rucielmaeobias277` |
+| Password | `Rucielmae@21` |
 
-### Seeded content
+Customers sign in with either their email address or their username. Re-running the seeder
+resets this password, which is the point of a seeder but worth knowing.
 
-19 services (with 24 short/long-hair style variants), 27 inventory items linked to the
-services that consume them, 15 appointments spread across every status, 6 customer
-reviews, 3 promos (active, upcoming, expired), 6 versioned Terms & Conditions, 4 blocked
-dates and 3 contact messages — enough to exercise every screen and report.
+> **Note:** the launcher scripts (`start-dev.bat`, `dev-up.bat`) still print an older demo
+> customer address that `UserSeeder` no longer creates. Use the credentials above.
+
+### Guards are isolated
+
+Customers authenticate on the `web` guard against the `users` table; staff authenticate on
+the `admin` guard against the `admins` table. They share one session cookie but have separate
+providers and session namespaces, so a customer session can never reach `/admin` and staff
+credentials are rejected by the customer login form. Customer routes additionally require an
+active account (`user.active`), and authenticated pages send `no-store` cache headers so Back
+after a logout cannot redraw a panel.
 
 ---
 
 ## Running the app
 
-There are two supported ways to run it locally. Both serve the same code and the
-same database, and both can be used at the same time.
+### Option A — XAMPP / Apache
 
-### Option A — XAMPP / Apache (no extra scripts)
+The project lives in the XAMPP web root. With Apache running, just open:
 
-The project already lives in the XAMPP web root, so if Apache is running you can
-just browse to:
+- Customer site — <http://localhost/BTA/public/>
+- Admin panel — <http://localhost/BTA/public/admin/login>
 
-- Customer site: <http://localhost/BTA/public/>
-- Admin panel: <http://localhost/BTA/public/admin/login>
+`public/.htaccess` handles the rewriting and Laravel derives the base path from the request.
 
-Nothing to start or stop. `public/.htaccess` handles the rewriting, and Laravel
-derives the `/BTA/public` base path from the request, so generated asset URLs are
-correct.
-
-### Option B — detached dev server on port 8000
-
-Use this when you want the site to stay up independently of Apache, or to keep
-working on port 8000 while Apache serves the same app.
+### Option B — the bundled dev server (port 8000)
 
 | Script | What it does |
 | --- | --- |
-| `dev-up.bat` | Starts a hidden supervisor, waits until the site really answers, then opens your browser. Closing the window does **not** stop the site. |
-| `dev-down.bat` | Gracefully stops the supervisor and the port-8000 server. Apache and MySQL are left alone. |
-| `start-dev.bat` | Foreground alternative: migrates, seeds, builds assets, then serves in this window. Also opens the browser itself once the site answers. Ctrl+C stops it. |
+| `dev-up.bat` | Starts a detached supervisor, waits until the site genuinely answers, then opens your browser. Closing the window does not stop the site. |
+| `dev-down.bat` | Gracefully stops the supervisor and the port-8000 server. Apache and MySQL are untouched. |
+| `start-dev.bat` | Foreground alternative: checks MySQL, creates the database, runs `migrate --seed`, builds assets, then serves. Ctrl+C stops it. |
 
-The supervisor (`tools/dev-supervisor.ps1`) checks the app every few seconds and
-restarts `php artisan serve` if it dies or stops answering, and it restarts MySQL
-if the database goes away. It passes `--port=8000` explicitly, because
-`artisan serve` otherwise silently moves to 8001/8002 when the port is busy.
+- Customer site — <http://localhost:8000>
+- Admin panel — <http://localhost:8000/admin/login>
+- Logs — `storage/logs/dev-supervisor.log`, `storage/logs/serve.log`, `storage/logs/wait-for-site.log`
 
-Plain `php artisan serve` still works too, it just stops when you close the
-terminal.
+Plain `php artisan serve` works too; it just stops when you close the terminal.
 
-- Customer site: <http://localhost:8000>
-- Admin panel: <http://localhost:8000/admin/login>
-- Supervisor log: `storage/logs/dev-supervisor.log`
-- Dev server log: `storage/logs/serve.log`
-- Startup wait log: `storage/logs/wait-for-site.log`
+> Cold start is slow on Windows: the dev server needs roughly 45 seconds to accept its first
+> connection, and the first request can take longer while Laravel compiles config and views.
+> `dev-up.bat` polls the site itself before opening your browser, so you will not land on a
+> connection error. If the site never comes up, MySQL is the usual suspect.
 
-> Cold start is slow on this machine: the dev server needs roughly 45s to accept
-> its first connection and the first request can take another ~2 minutes while
-> Laravel compiles config and views. `dev-up.bat` waits for the site to genuinely
-> answer before opening the browser, so it will not drop you on an error page.
-
-#### Why you used to see "Firefox can't connect to the server at 127.0.0.1:8000"
-
-The launcher used to decide the site was up by looking for the marker file
-`storage/dev-server.ready`. That marker survives a crash, a force-kill or a
-reboot, so after any unclean shutdown the next run saw a leftover marker, skipped
-the wait entirely, and opened the browser onto a port with nothing listening on it.
-
-Both launchers now ask the site itself instead, via `tools/wait-for-site.ps1`,
-which polls `http://127.0.0.1:8000/` until it gets a real HTTP response. The
-marker file is cleared on every launch and is only rewritten after a successful
-check, so it can no longer lie. `dev-up.bat` also refuses to open the browser at
-all if the site never comes up, and prints which log to read instead.
-
-If the site is still down, it is almost always MySQL: check the XAMPP control
-panel, then `storage/logs/wait-for-site.log`.
-
-Customer and admin sessions are **completely isolated** — they use separate guards
-(`web`/`users` and `admin`/`admins`), separate tables and separate session state. Being
-logged in as a customer grants no access to `/admin`, and admin credentials are rejected
-by the customer login form. This is enforced by `auth.admin` middleware and covered by
-tests in `tests/Feature/LoginTest.php`.
+`tools/` also holds `start-mysql-isolated.bat` for running a second MySQL instance on its own
+port if XAMPP's data folder is damaged.
 
 ---
 
-## Access model
+## Project structure
 
-Three kinds of visitor, one admin panel with three roles.
-
-### Visitor ("user")
-
-A signed-out visitor may browse everything public — home, services, both service
-grid views, service detail, about, contact and the published T&C — but **cannot book**.
-`GET /book` and `POST /book` sit behind `auth`, so a guest is redirected to the login
-form and returned to the booking page afterwards (`redirect()->intended()`).
-
-### Customer
-
-A registered, active account (`users` table, `web` guard) may book, manage their own
-appointments (view, cancel, reschedule, rate), read notifications and maintain their
-profile. Every booking is tied to `user_id`, so history is always attributable.
-Deactivating an account immediately blocks the booking form and the rest of the
-customer area via the `user.active` middleware.
-
-### Admin
-
-Staff log in on the separate `admin` guard against the `admins` table. All three roles
-share one panel, but `App\Enums\AdminRole::abilities()` decides what each may reach.
-That one table drives both halves of enforcement:
-
-- **Routes** — `admin.role:admin.<ability>` middleware (`App\Http\Middleware\EnsureAdminRole`)
-- **Views** — `@can('admin.<ability>')`, so a button is never shown to a role the
-  server would reject anyway
-
-> Laravel's built-in `can:` middleware authorises against the **default** guard, which
-> here is the customer `web` guard. Since admins authenticate on `admin`, `can:` would
-> see no user and deny every admin — hence `EnsureAdminRole`, which reads the admin
-> guard explicitly.
-
-| Ability | Super Admin | Manager | Staff |
-| --- | :---: | :---: | :---: |
-| Dashboard, Appointments (status/notes/down-payment) | ✓ | ✓ | ✓ |
-| Calendar, Catalogue, Inventory, Registered Users, Reviews (view) | ✓ | ✓ | ✓ |
-| Calendar (block dates, operating hours) | ✓ | ✓ | — |
-| Catalogue, Inventory, Low-Stock Tags, Promos, Messages (write) | ✓ | ✓ | — |
-| Registered Users (deactivate/reactivate) | ✓ | ✓ | — |
-| Registered Users (delete) | ✓ | — | — |
-| Terms & Conditions (view) | ✓ | ✓ | — |
-| Terms & Conditions (edit, publish, delete) | ✓ | — | — |
-| Reports | ✓ | ✓ | — |
-
-Super Admin holds every ability implicitly, so adding a new one only needs wiring up
-once. The sidebar renders **Main / Catalog / Operations / System** groups and omits any
-screen the signed-in role cannot open, so a narrower role never meets a dead link. The
-whole matrix is covered by `tests/Feature/AdminRoleTest.php`.
-
----
-
-## Running the tests
-
-```bash
-php artisan test
-```
-
-**114 tests, 450 assertions**, all passing. The suite defaults to an **in-memory SQLite**
-database (see `phpunit.xml`) so it needs no database server and is fully isolated.
-
-To run the same suite against MySQL, override the connection in the environment:
-
-```bash
-# Linux / macOS
-DB_CONNECTION=mysql DB_HOST=127.0.0.1 DB_PORT=3306 DB_DATABASE=bta_test \
-  php artisan test
-
-# Windows (PowerShell)
-$env:DB_CONNECTION="mysql"; $env:DB_DATABASE="bta_test"; php artisan test
-```
-
-The full suite has been verified green on **both** SQLite and MySQL/MariaDB.
-
-### Test coverage
-
-| Suite | Tests | Focus |
-| --- | --- | --- |
-| `RegistrationTest` | 12 | Registration screen, successful signup, hashed password, derived username, unique + valid email, min-8 password, confirmation match, terms acceptance, welcome notification |
-| `LoginTest` | 15 | Email **and** username login, case-insensitivity, wrong password, unknown account, **rate limiting**, deactivated accounts, logout, guest redirects, **admin/customer guard isolation** |
-| `BookingCreationTest` | 22 | Booking creation, **guests forced to log in**, deactivated accounts, reference format, price snapshotting, variant pricing, multi-service totals, every validation rule, operating hours, admin-blocked dates, slot collisions, allergy merging, slot-lookup endpoint |
-| `AppointmentStatusUpdateTest` | 17 | Approve / decline / advance status, status history with `from` → `to` and actor, internal-only admin notes, manual GCash verification, authorization, customer cancellation |
-| `LowStockTaggingTest` | 20 | The `quantity <= threshold` rule, sold-out derivation, Best Seller preservation, manual-override detection, single + bulk tagging, **auto-flagging when a service is booked**, stock restored on cancellation |
-| `PublicPagesTest` | 15 | Landing, both service views, filters, contact, and the full 4-step password reset (hash-only storage, no account enumeration, single-use codes) |
-| `AdminRoleTest` | 13 | The ability matrix itself, per-role page access, per-role write-route denial, hidden write buttons, sidebar filtering per role, customer/admin guard isolation |
-
-### HTTP smoke tests
-
-Two end-to-end scripts drive a real dev server with a cookie jar:
-
-```bash
-php artisan serve &                       # in another terminal
-php storage/app/tmp/smoke.php             # 33 read-path assertions
-php storage/app/tmp/write_smoke.php       # 16 write-path assertions
-```
-
-`smoke.php` walks the public pages, logs in as a customer, checks every
-customer-authenticated page, then logs in as an admin **in the same browser** to prove
-the guards are isolated, then requests all 21 admin pages. `write_smoke.php` exercises
-service/variant creation, item creation, date blocking, T&C versioning, promo creation,
-CSV export, registration, booking and cancellation.
-
----
-
-## Feature map
-
-### Customer side (15 flows)
-
-| # | Flow | Route |
-| --- | --- | --- |
-| 1 | Register | `GET/POST /register` |
-| 2 | Login (username or email, rate limited) | `GET/POST /login` |
-| 3 | Forgot password — 4 steps: email → 6-digit code → new password → confirm | `GET/POST /password`, `/password/code`, `/password/reset` |
-| 4 | Browse services (public, search + category + price filters) | `GET /services` |
-| 5 | Book appointment + auto-generated booking summary (sign-in required) | `GET/POST /book`, `GET /appointments`, `/appointments/{id}` |
-| 6 | My appointments / transactions (status filter, action buttons only) | `GET /appointments?status=` |
-| 7 | Cancel appointment (auto-filled reference, reason, policy checkbox) | `GET/PATCH /appointments/{id}/cancel` |
-| 8 | Reschedule appointment (current slot read-only, re-validated) | `GET/PATCH /appointments/{id}/reschedule` |
-| 9 | Notifications (read-only, bell with unread count) | `GET /notifications` |
-| 10 | Rate service (1–5 stars, completed appointments only, one per booking) | `GET/POST /appointments/{id}/rate` |
-| 11 | Profile management (details, optional password, picture upload) | `GET/PATCH /profile` |
-| 12 | Contact us (name, email, topic dropdown, message) | `GET/POST /contact` |
-| 13 | Customer dashboard (upcoming snapshot, recent activity, quick links) | `GET /dashboard` |
-| 14 | Landing / home page | `GET /` |
-| 15 | Refined grid view (category-filtered service grid) | `GET /services-grid` |
-
-### Admin side (14 flows)
-
-| # | Flow | Route |
-| --- | --- | --- |
-| 1 | Admin login (separate guard) | `GET/POST /admin/login` |
-| 2 | Admin dashboard (metrics, revenue chart, low-stock alerts) | `GET /admin` |
-| 3 | Appointment management (approve / decline / update status, internal notes) | `GET /admin/appointments` |
-| 4 | Service & item management overview (combined) | `GET /admin/catalog` |
-| 5 | Service management (add / edit / delete + variants) | `GET /admin/services` |
-| 6 | Inventory / item management (add / edit / delete + linked services) | `GET /admin/inventory` |
-| 7 | Low-stock / not-available tagging (single + bulk) | `GET /admin/tags` |
-| 8 | Calendar & blocked dates (+ operating hours) | `GET /admin/calendar` |
-| 9 | Registered users management (view / deactivate / delete) | `GET /admin/users` |
-| 10 | Terms & conditions editor (versioned, per category) | `GET /admin/terms` |
-| 11 | Review moderation (view + delete only) | `GET /admin/reviews` |
-| 12 | Sales / usage reports (+ CSV export) | `GET /admin/reports` |
-| 13 | Promo / announcements management (+ push to customers) | `GET /admin/promos` |
-| 14 | Admin navigation shell (persistent sidebar) | layout `resources/views/layouts/admin.blade.php` |
-
----
-
-## Architecture
+The separation is by role at every layer — routes, controllers, views, middleware and
+models — so the customer site and the admin panel never share a controller or a layout.
 
 ```
 app/
-├── Console/Commands/LogPromptCommand.php    php artisan prompts:log
-├── Enums/                                   AppointmentStatus, ItemTag,
-│                                            DownPaymentStatus, AdminRole,
-│                                            TermsCategory, InquiryTopic, ChangedBy
+├── Casts/TolerantEnum.php              reads a stored enum value without throwing
+├── Contracts/NormalizesEnumValues.php  legacy-value normalisation contract
+├── Enums/                              AppointmentStatus, AdminRole, ItemTag,
+│                                       DownPaymentStatus, TermsCategory,
+│                                       InquiryTopic, ChangedBy
 ├── Http/
 │   ├── Controllers/
-│   │   ├── Admin/                            14 admin flows (+ Admin\Auth\AdminSessionController)
-│   │   ├── Auth/                             register, login, 4-step password reset
-│   │   └── Customer/                         appointments, cancel, reschedule,
-│   │                                        rate, notifications, profile, dashboard
-│   ├── Middleware/                          AuthenticateAdmin, EnsureAdminRole,
-│   │                                        EnsureUserIsActive,
-│   │                                        RedirectIfAuthenticated{,Admin}
-│   └── Requests/                            Form Request validation
-│                                            (Auth/, Admin/, Customer/)
-├── Models/                                  15 Eloquent models
-├── Notifications/                           12 notification classes
-├── Services/
-│   ├── BookingAvailability.php              operating hours + blocked dates + slots
-│   ├── BookingService.php                   transactional booking, stock tracking
-│   ├── PasswordResetService.php             hashed 6-digit codes with expiry
-│   └── ReportService.php                    sales/usage aggregation
-└── Support/
-    ├── Nav.php                              active-nav-item resolution
-    ├── PromoBanner.php                      site-wide active promo
-    └── PromptLogger.php                     append-only prompt.log
+│   │   ├── Admin/                      17 controllers (dashboard, appointments, catalogue,
+│   │   │                               categories, technicians, inventory, tags, calendar,
+│   │   │                               users, terms, reports, promos, messages, profile)
+│   │   │   └── Auth/                   AdminSessionController, AdminPasswordResetLinkController
+│   │   ├── Auth/                       customer register, login, password reset
+│   │   ├── Customer/                   booking, cancel, reschedule, notifications,
+│   │   │                               profile, terms
+│   │   ├── HomeController, ServiceController, PromoController,
+│   │   │   ContactController, SessionStatusController
+│   ├── Middleware/                     AuthenticateCustomer, AuthenticateAdmin,
+│   │                                   EnsureAdminRole, EnsureUserIsActive,
+│   │                                   RedirectIfAuthenticated{,Admin},
+│   │                                   PreventAuthenticatedCaching
+│   ├── Requests/                       Auth/ Admin/ Customer/ Shared/
+├── Models/                             16 Eloquent models
+├── Notifications/                      13 notification classes
+├── Services/                           BookingService, BookingAvailability,
+│                                       PasswordResetService, ReportService,
+│                                       AppointmentArchiver, UserAnonymizer
+└── Support/                            BookingSteps, BookingHistory, DataTable, Nav,
+                                        TermsRenderer, PriceFormatter, TabTitle,
+                                        NotificationRow, ValidationToast, PromptLogger …
+
+resources/views/
+├── layouts/                            customer, admin, auth
+├── components/ui/                      the whole design system — button, badge, card,
+│   │                                    dialog, admin-table, stat, toast, confirm-dialog,
+│   │                                    photo-crop-dialog, form/* (input, select, switch,
+│   │                                    checkbox, password, date-picker, textarea)
+├── components/{brand,salon,terms}/     logo, emblem, service cards, T&C modal
+├── partials/                           customer nav + footer, admin sidebar + topbar
+├── home|about|contact|services|promos|customer|admin|auth
 ```
 
-**Design decisions worth knowing:**
+### Key models
 
-- **Form Requests everywhere.** Client-side hints are for convenience only; every rule
-  is enforced server-side in `app/Http/Requests/`.
-- **Blade component library.** `resources/views/components/` holds the whole design
-  system (`ui.button`, `ui.badge`, `ui.card`, `ui.form.*`, `ui.star-rating`,
-  `ui.errors`, `brand.logo`, `ui.service-card`). Pages compose components rather than
-  repeating markup.
-- **Alpine for interactivity only.** Booking baskets, star ratings, dropdowns, the rich
-  text editor toolbar and the date/slot picker are Alpine components. Server-rendered
-  HTML stays the source of truth — Alpine only mirrors state.
-- **Password show/hide is a text link**, not a button, matching the mockup.
-- **Admin notes never leak.** `admin_notes` is rendered only in `admin/appointments/*`;
-  a test asserts the customer-facing view does not contain it.
-- **Price is snapshotted.** `appointment_service` stores the service name, variant,
-  price and duration at booking time, so later catalogue edits never rewrite history.
+| Model | Role |
+| --- | --- |
+| `Appointment` | A booking: reference number, snapshotted total, status, admin notes, soft deletes |
+| `AppointmentService` | One service line on an appointment, with name / variant / price / duration snapshotted |
+| `AppointmentStatusHistory` | Every transition, with `from` → `to` and the actor |
+| `Service` / `ServiceVariant` | The catalogue and its per-length pricing |
+| `ServiceCategory` | Real rows carrying the colour the admin calendar paints their chips |
+| `Technician` | Someone a customer can request when booking. Not an `Admin` — cannot sign in |
+| `InventoryItem` | Stock: quantity, unit, reorder threshold, status tag, linked services |
+| `BlockedSlot` | A closure: whole day (both times null) or a time range, many per date |
+| `SalonSetting` | Singleton row: opening hours, slot interval, booking horizon, minimum notice, deposit rules |
+| `Promo` | A dated offer with an image and an announce flag |
+| `TermsAndCondition` | Published terms, one per category (booking / cancellation / rescheduling) |
+| `User` / `Admin` | The two authentication tables, on two guards |
+| `ContactMessage`, `PasswordResetCode`, `Notification` | Contact inbox, hashed reset codes, Laravel's database notifications |
+
+### Custom artisan commands
+
+| Command | Purpose |
+| --- | --- |
+| `appointments:archive-completed` | Archives settled appointments past the retention window. Scheduled nightly at 02:00. |
+| `mail:check` | Reports whether the mail configuration can actually deliver |
+| `inventory:clear` | Removes seeded/demo inventory rows |
+| `users:clear` | Removes seeded/demo customer rows |
+| `prompts:log` | Appends to the development prompt log (see [Prompt logging](#prompt-logging)) |
 
 ---
 
-## Design system
+## How the booking rules work
 
-The design system is derived from the supplied reference mockup (`UI.jpg` +
-`Balai ti Arjud Beauty Lounge Homepage.png`) and lives in **one place**:
-the CSS custom properties in `resources/css/app.css`.
+`App\Services\BookingAvailability` is the single source of truth for "can this be booked?".
+A date and time must satisfy **all** of:
 
-### Typography
+1. Not in the past, and at least `minimum_notice_hours` ahead (24h by default)
+2. Within the booking horizon (`booking_lead_days`, 60 days)
+3. On a day the salon is open, per `salon_settings.operating_hours`
+4. Outside the standing lunch break (12:00–13:00)
+5. Not covered by an admin **blocked slot** — whole day or time range
+6. Inside that day's opening hours
+7. Not already taken by a pending / confirmed / in-progress appointment
 
-- Headings: **Playfair Display** (serif, elegant)
-- Body / UI: **Poppins**
-- Both loaded from Google Fonts
+The same rules run on the booking form, on the reschedule form (excluding the appointment's
+own slot) and on the public `/book/slots` JSON endpoint that feeds the date picker, so the
+greyed-out dates in the calendar and the server's answer can never disagree. The final check
+runs inside a database transaction, so two customers cannot take the same slot.
 
-### Colour tokens
+**Price is snapshotted.** `appointment_service` stores the service name, variant, price and
+duration at booking time, so later catalogue edits never rewrite booking history.
 
-| Token | Value | Role |
-| --- | --- | --- |
-| `--color-primary` | `#6E211B` | Deep maroon — headers, primary buttons, nav |
-| `--color-primary-dark` | `#4A1712` | Hover / active |
-| `--color-gold` | `#C9A24B` | Accent — highlights, icons, tags |
-| `--color-gold-light` | `#E8D8A8` | Soft gold fills |
-| `--color-sienna` | `#8C5B3E` | Secondary accent, italic taglines |
-| `--color-blush` | `#E8C9C0` | Soft badge background |
-| `--color-linen` | `#F6EFE3` | Page background |
-| `--color-cream` | `#FBF7EF` | Card background |
-| `--color-text-dark` | `#2E2220` | Body text |
-| `--color-text-muted` | `#6B5A52` | Secondary text |
+**Stock is linked.** Booking a service decrements every inventory item linked to it and
+re-derives its status tag; cancelling or rescheduling returns the reserved stock. Tags are
+derived from quantity alone — `quantity <= 0` is Sold Out, `quantity <= reorder_threshold` is
+Low Stock — while an admin's explicit pick is treated as a manual override and labelled as one.
 
-> **On the sampled primary.** The brief supplied `#6E2A33` as a *starting* value and
-> asked for exact matches to be sampled from the mockup. Pixel-sampling the reference
-> artwork (the "Book an Appointment" CTA, the H1 glyphs and the circular emblem) gives a
-> consistent `#6E211B` family, so that is what ships. If you prefer the supplied value,
-> change one line in `resources/css/app.css` — every component follows.
+**No payment gateway.** Deposit fields and a manual verification status
+(`unverified` / `verified` / `rejected` / `not_required`) exist and an admin verifies a
+customer's GCash reference by hand from the appointment screen. The seeded salon
+configuration has deposits **disabled**, since the booking form does not ask for a reference.
 
-### Status badges
+---
 
-| Status | Treatment |
-| --- | --- |
-| Pending | Muted gold / tan |
-| Confirmed | Green |
-| In Progress | Amber / orange |
-| Completed | Solid green |
-| Cancelled | Red / maroon |
-| Low Stock | Tan / orange warning |
-| Best Seller | Gold |
-| Sold Out | Red |
+## Salon operating rules
 
-### Component styles
+From `SalonSetting` and `BookingAvailability`:
 
-- Rounded cards, soft shadow, cream background, thin gold or maroon border
-- Primary buttons: solid deep maroon, cream text, fully rounded
-- Secondary buttons: outlined maroon or gold
-- Show/Hide toggles: small text links (never buttons)
-- Service cards: image thumbnail, name, price, duration, "Book Now"
-- Admin sidebar: icons + labels, maroon active state, live pending/low-stock badges
-- Logo: circular gold-ringed emblem with the Playfair wordmark
+- **Closed every Monday.** Tuesday to Sunday, **09:00 – 17:00** on a single schedule.
+  Monday's absence from the operating-hours map is the whole mechanism for a standing weekly
+  closure — nothing has to block it, and the customer calendar greys Mondays from the same map
+- **30-minute slots**, generated from the opening window
+- **Lunch break 12:00 – 13:00** on every open day; 12:00 and 12:30 are removed from the grid
+  everywhere, not just hidden in the dropdown
+- **24 hours' minimum notice**, bookings open **60 days** ahead
+- **Blocked slots** let staff close a whole day (public holiday) or a window on an ordinary day
+  (staff meeting), several per date. `end_time` is exclusive, so a 14:00–16:00 block leaves
+  16:00 bookable
+- **Only settled bookings** — completed or cancelled — can be archived, restored or deleted.
+  A booking on the chair right now is the row the salon must never be able to lose
 
-### Responsive strategy
-
-- **Customer side** is mobile-first (the mockup's customer screens are phone-width)
-- **Admin side** is desktop-optimised, with an off-canvas drawer on small screens
+Operating hours and the slot rules are configuration in `salon_settings`, not records, so
+there is no admin screen for them: they are read on every booking request through
+`SalonSetting::current()`, which is why the row is a singleton. One-off closures are records
+and do have a screen, under Admin → Calendar.
 
 ---
 
 ## Data model
 
-16 application tables plus Laravel's `sessions`, `cache`, `jobs` and `notifications`.
+Sixteen application tables, plus Laravel's `sessions`, `cache`, `jobs`, `password_reset_tokens`
+and `notifications`.
 
 | Table | Notes |
 | --- | --- |
-| `users` | Customers. Soft deletes, `is_active` for deactivation, derived `username` |
-| `admins` | Staff. Separate table/guard, `role` enum, soft deletes |
-| `salon_settings` | Single row: operating hours, slot interval, booking horizon, down-payment rules |
-| `services` | Soft deletes, `slug` for public URLs, `is_featured` |
-| `service_variants` | Short/long-hair style pricing, unique per service |
-| `inventory_items` | Quantity + unit + reorder threshold, `status_tag` enum, soft deletes |
+| `users` | Customers. Soft deletes, `is_active`, derived `username` |
+| `admins` | Staff. Separate table, separate guard, soft deletes |
+| `salon_settings` | Singleton: operating hours, slot interval, booking horizon, minimum notice, deposit rules |
+| `service_categories` | Name, colour (admin calendar chips), sort order |
+| `services` | `slug` for public URLs, price, duration, photo, `is_active`, `is_featured`, soft deletes |
+| `service_variants` | Per-length pricing, unique per service |
+| `inventory_items` | Quantity, unit, reorder threshold, status tag, soft deletes |
 | `service_inventory` | Many-to-many pivot with `quantity_per_service` |
-| `blocked_dates` | A single day, scoped to one service or all, optional time and internal reason |
-| `appointments` | Reference number, snapshotted total, down-payment fields, `admin_notes` (internal), soft deletes |
-| `appointment_service` | Per-appointment service lines with price/duration snapshots |
-| `appointment_status_history` | Every transition with `from`/`to`, actor type, actor id and name |
-| `reviews` | One per appointment (`unique` on `appointment_id`), soft deletes |
+| `blocked_slots` | Date + optional start/end time + optional reason. Many rows per date, no unique constraint on date |
+| `appointments` | Reference number, snapshotted total, status, down-payment fields, internal `admin_notes`, `archived_at`, `admin_seen_at`, idempotency key, soft deletes |
+| `appointment_service` | Service lines with name / variant / price / duration snapshots |
+| `appointment_status_history` | Every transition with `from` / `to`, actor type, id and name |
 | `contact_messages` | Topic enum, read flag, internal reply |
-| `terms_and_conditions` | `unique(category, version)`, single published version per category |
-| `promos` | Validity window, image, soft deletes, `notified` flag |
+| `terms_and_conditions` | One row per category, with a publish state |
+| `promos` | Validity window, image, `notified` flag, soft deletes |
 | `password_reset_codes` | Stores only `code_hash`, with `expires_at` and `attempts` |
-| `notifications` | Laravel's database channel, polymorphic notifiable |
 
-Conventions: foreign keys throughout, soft deletes where history matters, and backed PHP
-enums for every status field.
+Conventions: foreign keys throughout, soft deletes wherever history matters, and a backed PHP
+enum behind every status field.
+
+A schema dump is also committed at `balai_ti_arjud.sql` (MariaDB 10.4, with
+`sessions` / `cache` / `password_reset_codes` shipped as schema-only). Because it is tracked
+in git, scrub any real addresses and password hashes out of it before deploying.
 
 ---
 
-## Key behaviours
+## Tests
 
-### Booking validation
+```bash
+php artisan test
+```
 
-`App\Services\BookingAvailability` is the single source of truth for "can this be booked?".
-A date/time must satisfy **all** of:
+**1077 passed, 1 skipped, 5411 assertions.** The suite defaults to an in-memory SQLite
+database (`phpunit.xml`), so it needs no database server and is fully isolated. It has also
+been run green against MySQL/MariaDB by overriding `DB_CONNECTION` in the environment.
 
-1. Not in the past
-2. Within the configured booking horizon
-3. On a day the salon is open (per `salon_settings.operating_hours`)
-4. Not blocked by an admin (`blocked_dates`, salon-wide or service-specific)
-5. The time falls inside that day's opening hours
-6. The exact slot is not already taken by a pending / confirmed / in-progress booking
-7. At least one hour in the future
+```bash
+# Windows (PowerShell)
+$env:DB_CONNECTION="mysql"; $env:DB_DATABASE="bta_test"; php artisan test
+```
 
-The same rules run on the **booking form**, the **reschedule form** (excluding the
-appointment's own slot) and the **live `/book/slots` JSON endpoint** that feeds the date
-picker. Re-checking inside a transaction means two people cannot take the same slot.
+Feature tests are named after behaviour rather than after files, so they read as a
+specification of the app:
 
-### Low-stock tagging
-
-The suggestion is derived **purely from stock level**:
-
-| Condition | Suggested tag |
+| Test | Covers |
 | --- | --- |
-| `quantity <= 0` | Sold Out |
-| `quantity <= reorder_threshold` | Low Stock |
-| otherwise | Available (or Best Seller, if that tag is set) |
+| `BookingWizardTest`, `BookingRulesTest`, `BookingCreationTest`, `BookingSubmissionGuardTest` | The wizard, every availability rule, guests forced to log in, idempotency |
+| `AppointmentStatusUpdateTest`, `AppointmentArchiveTest`, `ArchivedAppointmentsScreenTest` | The status workflow and the archive rules |
+| `LoginTest`, `RegistrationTest`, `PublicPagesTest`, `AdminForgotPasswordTest` | Both guards in isolation, rate limiting, the reset wizard, public pages |
+| `AdminRoleTest`, `SingleActiveRoleTest` | The ability matrix, per-screen access, hidden controls |
+| `LunchBreakSlotsTest`, `SalonHoursDisplayTest`, `SalonConfigurationTest`, `BlockedSlotsTest` | Operating hours, the lunch break, closures |
+| `LowStockTaggingTest`, `TechnicianTest`, `ProfilePhotoCropTest` | Stock derivation, the technician roster, photo cropping |
+| `CustomerAppointmentsDeleteTest`, `BookAgainTest`, `LiveNotificationsTest`, `CustomerNotificationsPageTest` | Customer-side lifecycle and notifications |
+| `ReportsExportTest`, `AdminReportsLayoutTest`, `AdminAppointmentTableTest`, `AdminTablePagingTest` | Reports, CSV exports, the admin tables |
+| `SalonSettingsRemovalTest`, `TermsVersionRemovalMigrationTest`, `SingleActiveRoleTest` | Migrations that removed features, pinned so they cannot silently return |
 
-`Best Seller` survives quantity changes — it is a marketing decision, not a stock state —
-until the item actually runs out. Any explicit tag an admin picks is treated as a manual
-override, and the UI labels it as such (`hasManualOverride()`).
+---
 
-Booking a service **decrements every linked inventory item** and re-derives its tag;
-cancelling or rescheduling returns the reserved stock.
+## Design system
 
-### Down payment
+Tokens live in one place: the CSS custom properties in `resources/css/app.css`, mapped into
+Tailwind in `tailwind.config.js`. Change a token once and every component follows.
 
-Per the brief, **no payment gateway is integrated**. The booking form captures a GCash
-reference number, the booking summary shows the status as *Awaiting Verification*, and an
-admin verifies it by hand from the appointment detail screen. The configured percentage
-is editable under **Admin → Calendar → Operating Hours & Rules**.
+- **Type** — Playfair Display (display), Cormorant Garamond (headings), Parisienne (script
+  wordmark), Poppins (UI and body)
+- **Colour** — deep maroon primary, gold accent, linen page background, cream cards, blush
+  badge fills; a dedicated token set per appointment status and per stock tag, each with a
+  foreground/background pair so a badge is legible on either surface
+- **Shape** — rounded cards on a soft shadow, fully rounded pill buttons, thin gold or maroon
+  borders, a circular gold-ringed emblem
+- **Customer side** is mobile-first; the **admin panel** is desktop-optimised with an
+  off-canvas drawer on small screens
 
-### Password reset
+`resources/views/components/ui/` holds the shared components (`x-ui.button`, `x-ui.badge`,
+`x-ui.card`, `x-ui.dialog`, `x-ui.admin-table`, `x-ui.stat`, `x-ui.toast`, `x-ui.form.*`, and
+so on). Pages compose components rather than repeating markup, and the semantic class names
+in `app.css` (`btn-primary`, `card`, `badge`, `admin-nav-link`, `customer-nav-link`) are
+preferred over raw utilities for anything that already has a component.
 
-A four-step, session-bound wizard. Only `Hash::make()` of the six-digit code is stored
-(`password_reset_codes.code_hash`), with a 15-minute expiry, one active code per email, a
-5-requests-per-hour cap and a 5-wrong-attempts burn. The email form never reveals whether
-an address is registered.
+---
+
+## Deployment notes
+
+The project was built with **InfinityFree shared hosting** in mind, and three things in the
+codebase exist specifically for that environment:
+
+1. **No `storage:link`** — uploads live in `public/storage`, which the server already serves.
+   A symlink cannot survive an FTP upload, and InfinityFree does not allow the command
+2. **Relative Vite base** (`base: './'` in `vite.config.js`) — asset URLs resolve against
+   the CSS file's own location, so a webfont never resolves to a 404 when the app is not
+   served from the domain root
+3. **`bootstrap/app.php` detects a missing `public/` directory** and repoints `public_path()`
+   at the parent of the application root, so `@vite` and the `public` disk keep working on a
+   checkout whose contents have been hoisted (see `tools/package-infinityfree.ps1`)
+
+Set these in the server's `.env` before anything else:
+
+```
+APP_URL=https://youraccount.infinityfreeapp.com
+DB_DATABASE=epiz_12345678_bta
+DB_USERNAME=epiz_12345678
+DB_PASSWORD=<from the control panel>
+MAIL_MAILER=smtp
+MAIL_HOST=smtp.gmail.com
+MAIL_PORT=587
+MAIL_USERNAME=<the Google account the App Password was issued to>
+MAIL_PASSWORD=<the 16-character App Password>
+```
+
+`APP_URL` is not cosmetic. CSS, JavaScript and the compiled Tailwind bundle are addressed with
+`asset()`, which builds from it — left at `localhost`, a deployed site loads no stylesheet and
+no script. Uploaded images use `url()` and follow whichever host the visitor actually
+requested, so they survive a wrong `APP_URL` on their own.
+
+`MAIL_USERNAME` must be the address of the Google account the App Password was **issued to**,
+not merely an address the salon is known by. An App Password authenticates exactly one
+mailbox, so pairing it with any other address fails with `535-5.7.8 Username and Password not
+accepted` and the error points at the password rather than the username. Add the salon's
+public address to that account as an alias if it should appear as the sender.
+
+Then, from a shell pointed at the server:
+
+```bash
+composer install --no-dev --optimize-autoloader
+php artisan migrate --force
+npm ci && npm run build
+```
 
 ---
 
 ## Prompt logging
 
-Per the brief, a development-time audit trail lives at the project root.
+The project carries a development-time audit trail of the prompts that built it, at the
+project root.
 
-- **`prompt.log`** — append-only. Every entry is `[YYYY-MM-DD HH:MM:SS] <prompt or summary>`.
-  Previous entries are never overwritten.
-- **`PROMPT_LOG.md`** — the same history in a reviewable `### Task:` / `* Prompt used:` format.
-- **`App\Support\PromptLogger`** — `log()`, `module()` and `many()` helpers.
-- **`php artisan prompts:log "…" --module="…"`** — the CLI entry point.
+- **`prompt.log`** — append-only, one line per entry
+- **`PROMPT_LOG.md`** — the same history in a reviewable `### Task:` / `* Prompt used:` format
+- **`App\Support\PromptLogger`** and **`php artisan prompts:log`** — the programmatic and CLI
+  entry points
 
 ```bash
-php artisan prompts:log "Add a coupon code field to the booking form"
-php artisan prompts:log --module="Customer Flows 5-9" "Built cancel, reschedule and rate"
+php artisan prompts:log --module="Booking Rules" "Added minimum notice to the availability check"
 ```
 
-### Automatic capture (opencode)
-
-Prompts are captured **automatically** by the plugin at
-`.opencode/plugins/prompt-logger.js`. It hooks opencode's `chat.message` event,
-which fires the instant a prompt is submitted — before the model runs — so every
-prompt is already on disk even if the session is closed, interrupted, or
-navigated away from. Nothing depends on the agent remembering to log.
-
-The plugin writes to both `prompt.log` and `PROMPT_LOG.md`, and:
-
-- de-duplicates retries and permission re-asks via a `messageID` + text hash;
-- preserves multi-line prompts verbatim in the markdown log while keeping
-  `prompt.log` one greppable line per entry;
-- records attached file names alongside the prompt;
-- never throws — all writes are wrapped so logging cannot break a session.
-
-Because prompts are captured automatically, the agent only appends outcome
-entries with `php artisan prompts:log --module="…" "…"`. `AGENTS.md` documents
-this so the two never duplicate each other.
-
-The file is tracked in git so the history is reviewable alongside the code.
-
----
-
-## Environment notes
-
-**`php artisan test` uses SQLite by default.** The application, migrations and seeders all
-target MySQL, and `migrate --seed` plus the full test suite were verified against
-MySQL/MariaDB. SQLite is only the default *test* connection so the suite runs anywhere
-with no database server; see [Running the tests](#running-the-tests) to point it at MySQL.
-
-**Layout compatibility.** The schema avoids MySQL-only column types in the queries that
-run during tests. Aggregations in `ReportService` are bucketed in PHP rather than with
-`DATE_FORMAT`, so report output is identical on both engines.
-
-**Scheduled reminders.** `AppointmentReminderNotification` is dispatched from the
-appointment lifecycle. To send reminders automatically, add a scheduled job that calls
-it for tomorrow's confirmed appointments:
-
-```php
-// routes/console.php or app/Console/Commands
-Schedule::command('appointments:send-reminders')->dailyAt('09:00');
-```
-
-**Mail.** `MAIL_MAILER=log` is the default, so emails (welcome, password reset codes,
-booking updates, promo announcements) are written to `storage/logs/laravel.log` instead of
-being sent. Configure a real transport in `.env` for production.
+`AGENTS.md` documents the convention: prompts are captured automatically by an opencode plugin
+that hooks the `chat.message` event, so the agent only appends outcome entries and the two
+never duplicate each other.
 
 ---
 

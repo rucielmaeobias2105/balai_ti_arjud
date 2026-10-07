@@ -40,19 +40,21 @@ class CustomerPromoLayoutTest extends TestCase
     /* ------------------------------------------------------------------ */
 
 /**
-     * The card is two areas: a picture and a body. On desktop the picture is the
-     * left half and the text the right; below `md` they stack, so the picture is
-     * a 16:9 band.
- *
-     * `md:self-stretch` is the load-bearing rule. Without it the picture is
-     * stretched by the grid's default `align-items: stretch` to the full height
-     * of a text column that can be much taller — the same "squashed photo" fault
-     * the flexbox fix on the Services page was about.
+     * The card is two areas: a picture and a body. On desktop the picture is a
+     * 40% panel on the left and the text takes the rest; below `md` they stack,
+     * with the picture as a band above the text.
+     *
+     * The layout is the reference's promo card — a flex row with
+     * `align-items: stretch`, so both panels are exactly as tall as each other
+     * and the text is centred in its own. It used to be `md:grid-cols-2` with
+     * `items-start`, which left a long description growing the card downward with
+     * the picture floating at the top of a tall empty column.
      *
      * The responsive half is asserted against `app.css` rather than the markup:
-     * these are semantic classes, so the utilities live in the stylesheet and
-     * the HTML carries only `home-promo-card`. Asserting `md:grid-cols-2` in the
-     * page would pass or fail for reasons that have nothing to do with the card.
+     * these are semantic classes, so the utilities live in the stylesheet
+     * and the HTML carries only `home-promo-card`. Asserting `md:flex-row` in
+     * the page would pass or fail for reasons that have nothing to do with the
+     * card.
      */
 public function test_the_promo_card_puts_the_picture_beside_the_text_on_desktop(): void
     {
@@ -65,17 +67,57 @@ public function test_the_promo_card_puts_the_picture_beside_the_text_on_desktop(
         }
 
         $card = $this->ruleFor('home-promo-card');
-        $this->assertStringContainsString('md:grid-cols-2', $card, 'The card should go two-up — picture beside text — from md.');
-        $this->assertStringContainsString('grid', $card);
+
+        $this->assertStringContainsString('flex', $card, 'The card is a flex row: picture beside text.');
+        $this->assertStringContainsString('md:flex-row', $card, 'The two panels should sit side by side from md.');
+        $this->assertStringContainsString('md:items-stretch', $card, 'Both panels should be exactly as tall as each other.');
+
+        // 28px rounded corners clipping the whole card, as the reference has.
+        $this->assertStringContainsString('rounded-[28px]', $card);
+
         $this->assertStringNotContainsString('md:grid-cols-3', $card);
 
         $media = $this->ruleFor('home-promo-media');
-        $this->assertStringContainsString('aspect-[16/9]', $media, 'The picture should be a 16:9 band on mobile.');
-        $this->assertStringContainsString('md:aspect-auto', $media, '…and drop the fixed ratio at md, where it would letterbox.');
-        $this->assertStringContainsString('md:self-stretch', $media, 'The picture must stretch to the text height, not be squashed by it.');
+
+        // A minimum height rather than an aspect ratio.
+        //
+        // The ratio is what this used to carry — `aspect-[16/9]` on mobile and
+        // `md:aspect-[4/5]` on desktop — and it fixed the panel's shape
+        // independently of the picture in it. A promo image is a portrait poster,
+        // so it fitted inside a landscape or 4:5 box with most of the panel
+        // empty. A minimum height lets the picture and the text decide the card's
+        // height between them instead.
+        $this->assertStringContainsString('min-h-[240px]', $media, 'The picture should be a band on mobile.');
+        $this->assertStringContainsString('md:min-h-[420px]', $media, '…and a substantial panel on desktop.');
+        $this->assertStringContainsString('md:w-[40%]', $media, 'At md the picture gets the reference\'s 40% share of the card.');
+        $this->assertStringContainsString('md:flex-none', $media, '…and keeps it: in a flex row, width alone is only a suggestion.');
+        $this->assertStringNotContainsString('aspect-[', $media, 'The panel must not fix a shape the picture then has to fit inside.');
+
+        // The picture must NOT be told to match the text. That was the rule
+        // that made a long offer cramped: the image grew with the text column
+        // instead of the text growing to fill the space the image left.
+        $this->assertStringNotContainsString('md:self-stretch', $media);
+        $this->assertStringNotContainsString('md:aspect-auto', $media);
+
+        // No fixed height on the card, in any breakpoint. The panels decide it
+        // between them, so a fixed height would clamp the text again.
+        $this->assertStringNotContainsString('h-[280px]', $card);
+        $this->assertStringNotContainsString('h-[290px]', $card);
+        $this->assertStringNotContainsString('h-[320px]', $card);
+        $this->assertDoesNotMatchRegularExpression('/\bh-\[?\d/', $card, 'The card must not carry a fixed height.');
+
+        // Cards are stacked one per row, so they never stretch to match each
+        // other — which is what `items-start` used to be guarding against, and
+        // is now true of the grid rather than of the card's internals.
+        $grid = $this->ruleFor('home-promo-grid');
+        $this->assertStringContainsString('max-w-[1100px]', $grid, 'The list is the reference\'s 1100px measure.');
+        $this->assertStringContainsString('gap-10', $grid, '…with the reference\'s roomy gap.');
+        $this->assertDoesNotMatchRegularExpression('/grid-cols-[2-9]/', $grid, 'Promos are one per row, not a grid of cards.');
 
         $body = $this->ruleFor('home-promo-body');
         $this->assertStringContainsString('flex', $body);
+        $this->assertStringContainsString('flex-1', $body, 'The text panel takes the width the picture did not.');
+        $this->assertStringContainsString('justify-center', $body, '…and centres its copy vertically, as the reference does.');
     }
 
     /** The picture is the left area, and the text the right one. */
@@ -109,6 +151,43 @@ public function test_the_promo_card_puts_the_picture_beside_the_text_on_desktop(
 
         $this->assertStringContainsString('And a good deal more detail.', $html);
         $this->assertStringNotContainsString('…', $html, 'The description should not be truncated.');
+
+        /*
+         * The stylesheet must not clamp it either.
+         *
+         * The assertion above only proves the copy reached the HTML. It was
+         * passing while the page still truncated, because a five-line
+         * `-webkit-line-clamp` hides the overflow without changing the markup —
+         * so the text is present in the source and invisible on the screen.
+         *
+         * This is the half that was missed. A long offer has to be readable, not
+         * merely present, so the rule is asserted directly.
+         */
+        $description = $this->ruleFor('home-promo-body > p');
+
+        foreach (['line-clamp', '-webkit-box', 'text-ellipsis', 'overflow-hidden'] as $clamp) {
+            $this->assertStringNotContainsString(
+                $clamp,
+                $description,
+                'The description must not be clamped; the card grows to fit it instead.',
+            );
+        }
+
+        // And the text panel centres what is left, rather than stretching the
+        // description to fill the column.
+        //
+        // The description used to carry `flex-1` so a short promo pushed its
+        // foot down to the bottom of the column. The body is now `justify-center`
+        // — the reference's arrangement, where a two-line offer sits in the
+        // middle of its panel instead of clinging to the top with a gap beneath
+        // it. `flex-1` and `justify-center` both "fill the panel", so only one
+        // of them can be asserted, and this is the one the card now uses.
+        $this->assertStringNotContainsString('flex-1', $description);
+        $this->assertStringContainsString(
+            'justify-center',
+            $this->ruleFor('home-promo-body'),
+            'The text panel should centre its copy, as the reference card does.',
+        );
 
         // The description is escaped text, not markup.
         $this->makePromo(['description' => 'Use <b>bold</b> & care.']);
@@ -293,8 +372,11 @@ public function test_validity_lives_in_the_text_column(): void
     {
         $html = $this->get(route('home'))->assertOk()->getContent();
 
+        // `x-data` sits on the body ahead of the class list (see the layout:
+        // Alpine does not walk from the body on its own), so the attribute is
+        // matched anywhere in the tag rather than assumed to come first.
         $this->assertMatchesRegularExpression(
-            '/<body class="[^"]*flex-col/',
+            '/<body\b[^>]*class="[^"]*flex-col/',
             $html,
             'The body should be a flex column for the footer to be pushed down.',
         );

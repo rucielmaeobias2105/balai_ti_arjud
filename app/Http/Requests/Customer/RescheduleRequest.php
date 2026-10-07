@@ -76,19 +76,20 @@ class RescheduleRequest extends FormRequest
      * `dateProblems()`, so the message arrives on a different path but is the same
      * constant.
      */
+    /**
+     * The date rules raise a toast as well as inline errors, in the same colours
+     * the booking form uses.
+     *
+     * Reschedule reaches these rules through `timeProblems()` rather than
+     * `dateProblems()`, and reports every one of them against `preferred_date`
+     * because the dialog has one date field rather than a date and a time. The
+     * wording and the severity still have to match the booking form's, which is why
+     * both ask `BookingAvailability::toastFor()` rather than each deciding.
+     */
     protected function failedValidation(Validator $validator): void
     {
-        $messages = $validator->errors()->all();
-
-        foreach ([BookingAvailability::MINIMUM_NOTICE_MESSAGE] as $watched) {
-            if (in_array($watched, $messages, true)) {
-                session()->flash('toast', [
-                    'type' => 'warning',
-                    'message' => $watched,
-                ]);
-
-                break;
-            }
+        if ($toast = BookingAvailability::toastFor($validator->errors()->all())) {
+            session()->flash('toast', $toast);
         }
 
         parent::failedValidation($validator);

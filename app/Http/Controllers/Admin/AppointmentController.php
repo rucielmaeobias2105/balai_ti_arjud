@@ -89,13 +89,7 @@ class AppointmentController extends Controller
             'appointments' => $appointments,
             'filters' => $filters,
             'statusOptions' => AppointmentStatus::options(),
-            'counts' => Appointment::query()
-                ->active()
-                ->selectRaw('status, COUNT(*) as total')
-                ->groupBy('status')
-                ->pluck('total', 'status')
-                ->map(fn ($v) => (int) $v)
-                ->all(),
+            'counts' => $this->statusCounts(),
             // The two dropdown/dialog payloads, keyed by appointment id. Both
             // are rendered into the page once instead of being fetched per row:
             // the list already eager-loads the service lines, so the View dialog
@@ -341,7 +335,12 @@ class AppointmentController extends Controller
             'technician' => $appointment->technicianLabel(),
             'services' => $appointment->serviceLines->map(fn (AppointmentService $line) => [
                 'name' => $line->display_name,
-                'meta' => $line->duration_minutes.' min · Qty '.$line->quantity
+                // No duration. This read `$line->duration_minutes.' min · Qty '`,
+                // which rendered "0 min · Qty 1" on every booking whose line never
+                // had a duration filled in — a zero presented as a measurement.
+                // The quantity and the price are real; the duration was not, so it
+                // is not here to be hidden in the view either.
+                'meta' => 'Qty '.$line->quantity
                     // The advertised price at booking time, which may be a
                     // range; `total` below is the amount actually charged.
                     .' · '.PriceFormatter::display($line->display_price).' each',
@@ -362,6 +361,113 @@ class AppointmentController extends Controller
                 ->values()
                 ->all(),
         ];
+    }
+
+    /**
+     * One row's live state, for the polling endpoint below.
+     *
+     * Everything the browser needs to redraw a single row without being sent back
+     * to the server for the page: the status it is in, the menu from there, and
+     * which row actions that status permits.
+     *
+     * `canArchive`/`canDelete` are the model's own answers, not the view's, so a
+     * row the list chose not to offer Archive for and a row the poll decides not
+     * to offer it for are decided by the same rule. The routes re-check those
+     * answers regardless; this only keeps what is on screen honest.
+     *
+     * @return array<string, mixed>
+     */
+    protected function rowState(Appointment $appointment): array
+    {
+        return [
+            'status' => $appointment->status->value,
+            'label' => $appointment->status->label(),
+            // The class suffix the list tints the dropdown with, so a row can be
+            // recoloured as well as re-read. Sent as data rather than as a class
+            // name to apply: the server decides what the status is, and the
+            // browser composes the class from that answer.
+            'badge' => $appointment->status->badge(),
+            // Whether the dropdown itself is dead. Sent alongside the row's
+            // actions because they are the same status read twice, and a repaint
+            // that re-enabled the control on a completed row would offer a move
+            // the route refuses.
+            'locked' => $appointment->status->isLocked(),
+            'choices' => $this->statusChoices($appointment),
+            'can_archive' => $appointment->canBeArchivedByAdmin(),
+            'can_delete' => $appointment->canBeDeletedByAdmin(),
+        ];
+    }
+
+    /**
+     * How many active bookings sit in each status — the numbers on the status
+     * tabs.
+     *
+     * Extracted rather than repeated, so the page and the two JSON answers cannot
+     * drift: a tab counting differently from the list it filters would send an
+     * admin to an empty page and call it "no appointments".
+     *
+     * @return array<string, int>
+     */
+    protected function statusCounts(): array
+    {
+        return Appointment::query()
+            ->active()
+            ->selectRaw('status, COUNT(*) as total')
+            ->groupBy('status')
+            ->pluck('total', 'status')
+            ->map(fn ($value) => (int) $value)
+            ->all();
+    }
+
+    /**
+     * The live state of every row on the page, for the list's poller.
+     *
+     * Scoped to the rows actually on screen rather than to the whole table: the
+     * caller sends the ids it rendered, and this answers only for those. That
+     * keeps a filtered or paginated list from being told about bookings it is not
+     * showing, and keeps one row's actions from being driven by another page's
+     * data.
+     *
+     * Ids the caller does not own are dropped by `whereIn`, so a crafted list of
+     * ids narrows the answer rather than widening it — the row states carry no
+     * customer detail, and the endpoint is behind the same ability gate as the
+     * list it feeds.
+     */
+    public function rowStates(Request $request): JsonResponse
+    {
+        $ids = collect($request->query('ids', []))
+
+            // Only the shape the list itself produces. Anything else is dropped
+            // rather than coerced, so this cannot be turned into a way of
+            // scanning for ids that happen to exist.
+            ->filter(fn ($id) => is_numeric($id) && (int) $id > 0)
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            // The page renders fifteen rows. A longer list is a crafted request,
+            // and answering it would mean reading the table to serve a response
+            // no page can use.
+            ->take(60)
+            ->values();
+
+        if ($ids->isEmpty()) {
+            return response()->json(['rows' => [], 'counts' => $this->statusCounts()]);
+        }
+
+        $rows = Appointment::query()
+            ->active()
+            ->whereIn('id', $ids)
+            ->get()
+            ->mapWithKeys(fn (Appointment $appointment) => [
+                $appointment->id => $this->rowState($appointment),
+            ]);
+
+        // The tab counts ride along with the rows for the same reason they ride
+        // along with a save: one poll that keeps the whole list honest, rather
+        // than a second request for two numbers.
+        return response()->json([
+            'rows' => $rows,
+            'counts' => $this->statusCounts(),
+        ]);
     }
 
     public function show(Appointment $appointment): View
@@ -434,13 +540,35 @@ class AppointmentController extends Controller
         ];
 
         if ($request->expectsJson()) {
-            // Flashed as well as returned: the dropdown reloads the page on
-            // success so the row's menu, the status tab counts and the sidebar
-            // badge all match what was just saved, and this is the toast the
-            // reloaded page then renders.
-            session()->flash('toast', $toast);
+            /*
+             * The toast is returned rather than flashed, and that is a change.
+             *
+             * It used to be flashed as well, because the list reloaded the page on
+             * success and the reloaded page rendered it. Nothing reloads now — the
+             * row is redrawn in place — so a flash would sit in the session until
+             * the admin happened to navigate somewhere and then announce a status
+             * change that happened minutes ago. `appointmentStatus` raises the
+             * toast from this payload instead, which puts it on screen at the
+             * moment of the save.
+             *
+             * A plain form submission still redirects with the flash, so the
+             * JavaScript-off path is unchanged.
+             */
+            return response()->json($toast + [
+                'status' => $target->value,
 
-            return response()->json($toast + ['status' => $target->value]);
+                // The row's new state, so the browser can put the row back the way
+                // this save made it without asking for the page. This is what
+                // reveals Archive and Delete the moment a booking is completed —
+                // the two are rendered from a status the row did not have when the
+                // page was built.
+                'row' => $this->rowState($appointment->refresh()),
+
+                // The status tabs count the same rows the page does, so a change
+                // saved without a reload would otherwise leave them describing the
+                // list as it was a moment ago.
+                'counts' => $this->statusCounts(),
+            ]);
         }
 
         return back()->with('toast', $toast);

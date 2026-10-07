@@ -16,9 +16,7 @@
     </nav>
 
     <h1 class="font-display text-2xl font-bold tracking-tight text-primary">Welcome Back</h1>
-    <p class="mt-1.5 text-sm text-ink-muted">
-        Log in to your account to book appointments and manage your bookings.
-    </p>
+
 
 
     <form method="POST" action="{{ route('login') }}" class="mt-6 space-y-4" novalidate>
@@ -53,6 +51,20 @@
 
         <button type="submit" class="btn-primary w-full">Log In</button>
     </form>
+
+    {{-- The same two links the registration form carries, in the same muted
+         style, because the same policies govern signing in as govern signing
+         up. `x-terms.link` intercepts the click and opens the shared dialog,
+         so a customer who wants to check the cancellation policy does not lose
+         the half-typed username and password to a page load. Its `href` is the
+         standalone policy page, which is what a customer with JavaScript
+         disabled gets instead of a dialog that never appears. --}}
+    <p class="mt-5 text-center text-xs text-ink-muted">
+        By logging in you accept our
+        <x-terms.link :category="'booking'">Terms and Conditions</x-terms.link>
+        and
+        <x-terms.link :category="'cancellation'">Cancellation Policy</x-terms.link>.
+    </p>
 
     <p class="mt-6 text-center text-sm text-ink-muted">
         Don't have an account?

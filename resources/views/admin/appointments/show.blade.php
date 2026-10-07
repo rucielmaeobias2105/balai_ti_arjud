@@ -124,7 +124,24 @@
                     <div>
                         <dt class="text-xs font-semibold uppercase tracking-wider text-ink-muted">Schedule</dt>
                         <dd class="mt-1 font-medium text-primary">{{ $appointment->preferred_date->format('l, M j, Y') }}</dd>
-                        <dd class="text-sm text-ink-muted">{{ $appointment->time_label }} · {{ $appointment->total_duration }} min total</dd>
+                        {{-- The total duration is shown only when there is one. Every booking line
+                                 written before the salon recorded durations sums to zero, and "0 min
+                                 total" reads as a measurement rather than as the absence of one. The
+                                 same reasoning is behind Service's `duration_label` returning empty
+                                 instead of "0 min", and behind the duration being dropped outright
+                                 from the customer details dialog and the admin View dialog.
+
+                                 Note the spaces around the directives: `@endif` directly after a word
+                                 is not a directive to Blade at all — its pattern needs a boundary
+                                 before the `@`, so `total@endif` is emitted as literal text and the
+                                 `@if` above it is left unterminated, which is a parse error rather
+                                 than a wrong-looking page. --}}
+                        <dd class="text-sm text-ink-muted">
+                            {{ $appointment->time_label }}
+                            @if ($appointment->total_duration > 0)
+                                &middot; {{ $appointment->total_duration }} min total
+                            @endif
+                        </dd>
                         <dd class="text-sm text-ink-muted">Technician: {{ $appointment->technicianLabel() }}</dd>
                     </div>
 
@@ -135,7 +152,20 @@
                                 <li class="flex items-start justify-between gap-3 rounded-xl bg-linen/60 px-4 py-3">
                                     <div class="min-w-0">
                                         <p class="font-medium text-ink">{{ $line->display_name }}</p>
-                                        <p class="text-xs text-ink-muted">{{ $line->duration_minutes }} min &middot; Qty {{ $line->quantity }}</p>
+                                        {{-- Duration is shown only when there is one. Every booking line
+                                             written before the salon recorded durations sums to
+                                             zero, and "0 min total" / "0 min · Qty 1" read as a
+                                             measurement rather than as the absence of one. The
+                                             same reasoning is behind Service's `duration_label`
+                                             returning empty instead of "0 min", and behind the
+                                             duration being dropped outright from the customer
+                                             details dialog and the admin View dialog. --}}
+                                        <p class="text-xs text-ink-muted">
+                                            @if ($line->duration_minutes > 0)
+                                                {{ $line->duration_minutes }} min &middot;
+                                            @endif
+                                            Qty {{ $line->quantity }}
+                                        </p>
                                         {{-- The price as it was advertised when booked,
                                              which may be a range like "249/499". The
                                              figure on the right is what was charged. --}}

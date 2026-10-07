@@ -167,9 +167,26 @@ return [
     | to the server if the browser has a HTTPS connection. This will keep
     | the cookie from being sent to you when it can't be done securely.
     |
+    | `SESSION_SECURE_COOKIE` wins when it is set to true or false. When it is
+    | left unset the value is inferred from `APP_ENV`, so a production deploy
+    | gets the Secure attribute without anyone having to remember a step, while
+    | a local install keeps working over plain http://localhost and http://LAN-IP
+    | (where forcing it true would silently break every login).
+    |
+    | Note that production therefore requires HTTPS. Behind a TLS-terminating
+    | proxy, set `TRUSTED_PROXIES` so the request is recognised as secure.
+    |
     */
 
-    'secure' => env('SESSION_SECURE_COOKIE'),
+    'secure' => (function () {
+        $explicit = env('SESSION_SECURE_COOKIE');
+
+        if ($explicit === null || $explicit === '') {
+            return env('APP_ENV', 'production') === 'production';
+        }
+
+        return filter_var($explicit, FILTER_VALIDATE_BOOL);
+    })(),
 
     /*
     |--------------------------------------------------------------------------

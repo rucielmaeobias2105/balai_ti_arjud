@@ -128,11 +128,6 @@
                                 x-on:change="pick($event)"
                             >
 
-                            <p class="input-hint">
-                                JPG, PNG or WEBP. Up to 4 MB. Without one, this promo keeps the
-                                picture it already has.
-                            </p>
-
                             <p class="mt-1 truncate text-xs text-ink-muted" x-show="picked" x-cloak>
                                 <span x-text="picked"></span>
                             </p>

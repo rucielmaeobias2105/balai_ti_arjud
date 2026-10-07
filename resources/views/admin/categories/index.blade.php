@@ -71,8 +71,9 @@
                                         icon="heroicon-o-trash"
                                         tone="danger"
                                         :action="route('admin.categories.destroy', $category)"
-                                        :confirm="'Delete the '.$category->name.' category? Its '.$category->services_count.' service(s) are kept.'"
-                                    />
+:confirm="$category->name"
+                                    confirm-event="confirm-delete-category"
+                                />
                                 @endcan
                             </div>
                         </td>
@@ -94,4 +95,21 @@
             </tbody>
         </table>
     </x-ui.admin-table>
+
+    {{-- One dialog for every row.
+
+         The old prompt counted the row's services — "Its 3 service(s) are
+         kept." One dialog serves every row, so the sentence is composed here
+         and the count is dropped rather than faked: "Its services are kept" is
+         the part that decides whether an admin clicks, and a stale number would
+         be worse than none. --}}
+    <x-ui.confirm-dialog
+        title="Delete this category?"
+        event="confirm-delete-category"
+        verb="Delete"
+        subject="category"
+        warning="Its services are kept."
+        confirm-label="Yes, delete it"
+        cancel-label="Cancel"
+    />
 @endsection

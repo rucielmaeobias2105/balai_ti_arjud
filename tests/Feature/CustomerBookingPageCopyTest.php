@@ -61,21 +61,29 @@ class CustomerBookingPageCopyTest extends TestCase
         $this->assertStringNotContainsString('Helps your therapist prepare ahead of time.', $html);
 
         // The cards themselves are untouched — only their subtitles went. The
-        // sequence runs 1…7: there is no down payment step, so Terms moved up.
+        // sequence runs 1…4: there is no down payment step, and steps 2+3 and
+        // steps 5+6 were each merged into one card, and Terms is no longer a card.
         foreach ([
             '1. Selected Service',
-            '2. Your Details',
-            '3. Preferred Date &amp; Time',
-            '4. Preferences &amp; Health Notes',
-            '5. Last Service(s) Availed',
-            '6. Choose Technician &amp; Special Request',
-            '7. Terms &amp; Conditions',
+            '2. Your Details &amp; Preferred Date &amp; Time',
+            '3. Preferences &amp; Health Notes',
+            '4. Last Service(s) Availed, Technician &amp; Special Request',
         ] as $title) {
             $this->assertStringContainsString($title, $html);
         }
 
-        // No step 8 left behind by the renumber.
-        $this->assertStringNotContainsString('8. Terms', $html);
+        // No heading from the pre-merge numbering survives, and no step 8 was
+        // left behind by the earlier down-payment renumber.
+        foreach ([
+            '2. Your Details<',
+            '3. Preferred Date &amp; Time',
+            '5. Last Service(s) Availed<',
+            '6. Choose Technician &amp; Special Request',
+            '7. Terms &amp; Conditions',
+            '8. Terms',
+        ] as $retired) {
+            $this->assertStringNotContainsString($retired, $html);
+        }
     }
 
     /* ------------------------------------------------------------------ */
@@ -168,25 +176,36 @@ class CustomerBookingPageCopyTest extends TestCase
     }
 
     /**
-     * The picker still carries its bounds and still explains a refused date.
+     * The picker still carries its bounds, and a refused date is still explained —
+     * by the toast.
      *
-     * The reason line is the replacement for the list, and it now quotes the
-     * server's own `problems` list from the slots endpoint — so it cannot describe
-     * a date differently from what a submit would do.
+     * There used to be a third thing here: a line of grey text under the date field
+     * bound to the slots endpoint's `problems`, so a refused date was explained
+     * twice — once there and once as a red toast. The inline line is gone.
+     *
+     * `problems` is still read, and still quoted verbatim rather than rebuilt from
+     * a client-side map, because the toast has to say the same thing a submit
+     * would. What changed is only where it is shown.
      */
     public function test_the_picker_still_carries_its_bounds_and_explains_a_refused_date(): void
     {
         $html = $this->html();
 
-        // The bounds come from the booking rules, not from any list.
+        // The bounds come from the booking rules, not from any list. They used to
+        // reach the field as the native date input's `min`/`max`; the field draws
+        // its own day cells now, so the window arrives as Alpine state and
+        // `dayState()` acts on it instead.
         $this->assertStringContainsString('name="preferred_date"', $html);
-        $this->assertStringContainsString('x-bind:min="minDate"', $html);
+        $this->assertStringContainsString('isWithinWindow(', $html);
         $this->assertStringContainsString('name="preferred_time"', $html);
 
-        // The live reason line is still there — it is what replaced the list, and
-        // it is bound to `problems` rather than to a blocked-date map.
-        $this->assertStringContainsString('dateBlockedReason', $html);
+        // The refusal is still the server's own wording, and still raised — but as a
+        // toast, not as a line under the field.
         $this->assertStringContainsString('data.problems', $html);
+        $this->assertStringContainsString('window.btaToast', $html);
+
+        // Nothing renders it inline any more.
+        $this->assertStringNotContainsString('dateBlockedReason', $html);
     }
     /* ------------------------------------------------------------------ */
     /* 4. There is no down payment step at all                            */
@@ -280,13 +299,11 @@ class CustomerBookingPageCopyTest extends TestCase
             'customer_phone',
             'preferred_date',
             'preferred_time',
-            // `allergies` is no longer a posted field. It is the *column* the
-            // salon reads, and step 4 now posts `allergy_preference` plus
-            // `allergies_other`, which `StoreBookingRequest::healthNote()` folds
-            // into it. Asserting the column name as a field name would pin a
-            // hidden input that no longer exists, and would pass even if nothing
-            // wrote the column any more.
-            'allergy_preference',
+            // `allergies` is not a posted field. It is the *column* the salon
+            // reads, and step 3 posts `allergies_other`, which
+            // `StoreBookingRequest::healthNote()` writes into it. Asserting the
+            // column name as a field name would pin a hidden input that no longer
+            // exists, and would pass even if nothing wrote the column any more.
             'allergies_other',
             'last_services_availed_note',
             'technician_id',
@@ -296,12 +313,17 @@ class CustomerBookingPageCopyTest extends TestCase
             $this->assertStringContainsString('name="'.$field.'"', $html, "The {$field} field should still be posted.");
         }
 
+        // The retired dropdown is not a field any more, so it must not be posted
+        // either — otherwise a reader would assume the closed set is still
+        // validated and the step is still two inputs.
+        $this->assertStringNotContainsString('name="allergy_preference"', $html);
+
         $this->assertStringContainsString(route('appointments.store'), $html);
         $this->assertStringContainsString('Confirm Booking', $html);
     }
 
     /**
-     * Step 5 asks a first-timer what they had done before, and shows a returning
+     * Step 4 asks a first-timer what they had done before, and shows a returning
      * customer their own record instead.
      *
      * These are two different fields rather than one field shown more or less
@@ -314,7 +336,7 @@ class CustomerBookingPageCopyTest extends TestCase
      * which is both more accurate than retyping it and available to the salon on
      * the booking either way.
      */
-    public function test_step_five_asks_a_first_timer_and_informs_a_returning_one(): void
+    public function test_step_four_asks_a_first_timer_and_informs_a_returning_one(): void
     {
         $firstTimer = $this->html();
 

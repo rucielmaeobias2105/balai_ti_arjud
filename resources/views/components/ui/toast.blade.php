@@ -58,11 +58,10 @@
     @if ($dismissible)
         <button
             type="button"
-            {{-- `x-on:click`, not the `@click` shorthand: Blade compiles a
-                 handful of directives (`@class`, `@checked`, `@disabled`, …) and
-                 leaves every other `@word` as literal text, so `@click` would
-                 render into the HTML as inert markup and the button would do
-                 nothing. --}}
+            {{-- `x-on:click` rather than the `@click` shorthand, for consistency with the
+             rest of the components. Both work — Alpine registers `@` as a prefix
+             for `x-on:` — but one spelling of the same directive across the
+             design system is easier to grep for than two. --}}
             x-on:click="window.btaToast.dismiss($el.closest('[data-toast]'))"
             class="-mr-1 shrink-0 rounded p-1 text-cream/70 transition hover:bg-cream/10 hover:text-cream"
             aria-label="Dismiss notification"

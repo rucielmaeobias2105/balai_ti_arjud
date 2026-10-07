@@ -4,6 +4,7 @@
 use App\Http\Controllers\Admin\AppointmentController as AdminAppointmentController;
 use App\Http\Controllers\Admin\Auth\AdminPasswordResetLinkController;
 use App\Http\Controllers\Admin\Auth\AdminSessionController;
+use App\Http\Controllers\Admin\CalendarController;
 use App\Http\Controllers\Admin\CatalogController;
 use App\Http\Controllers\Admin\ContactMessageController;
 use App\Http\Controllers\Admin\DashboardController as AdminDashboardController;
@@ -142,7 +143,22 @@ Route::middleware(['auth.customer', 'user.active', 'no.store'])->group(function 
     // Guests may browse the catalogue but must register before booking, so the
     // booking is always tied to an account.
     Route::get('/book', [AppointmentController::class, 'create'])->name('appointments.create');
-    Route::post('/book', [AppointmentController::class, 'store'])->name('appointments.store');
+
+    /*
+     * The one write route in the app that carried no rate limit.
+     *
+     * Contact is capped at 12/min, login at 10/min, password reset at 6/min, and
+     * this one — the most expensive write in the product, since it validates a
+     * basket, opens a transaction, writes an appointment and its lines, decrements
+     * linked stock and sends a notification — was uncapped.
+     *
+     * Twelve a minute, keyed by account, defined in AppServiceProvider. Paired with
+     * the idempotency key below, which is the part that stops a *double-tap*: the
+     * limiter would only slow the second request down, not stop it.
+     */
+    Route::post('/book', [AppointmentController::class, 'store'])
+        ->middleware('throttle:booking')
+        ->name('appointments.store');
 
     // Customer Flow 13 — the customer Dashboard is gone.
     //
@@ -162,6 +178,18 @@ Route::middleware(['auth.customer', 'user.active', 'no.store'])->group(function 
     // dialog on that booking. See `AppointmentController::show`.
     Route::get('/appointments', [AppointmentController::class, 'index'])->name('appointments.index');
     Route::get('/appointments/{appointment}', [AppointmentController::class, 'show'])->name('appointments.show');
+
+    // Customer Flow 5 — Book Again.
+    //
+    // Declared before the `{appointment}/cancel` and `{appointment}/reschedule`
+    // literals below only in the sense that it shares the parameter; it has its own
+    // third segment, so nothing shadows it.
+    //
+    // A redirect into `appointments.create?from=…` rather than its own form, so
+    // there is one booking screen with one set of rules. Refused for anything that
+    // is not this customer's own Completed booking — see the controller.
+    Route::get('/appointments/{appointment}/book-again', [AppointmentController::class, 'bookAgain'])
+        ->name('appointments.book-again');
 
     // Customer Flow 7 — Cancel Appointment
     Route::get('/appointments/{appointment}/cancel', [CancelAppointmentController::class, 'edit'])
@@ -316,8 +344,16 @@ Route::prefix('admin')->name('admin.')->group(function () {
         // `destroy` is excluded from the resource and re-declared below as an
         // explicit DELETE, so the "settled statuses only" rule it enforces is
         // visible on the route rather than implied by a resource default.
+        //
+        // `store` is excluded for the same kind of reason, and it was a live 500.
+        // Bookings are customer-initiated — there is no admin create form, and
+        // `create` was already excluded because of it — but leaving `store`
+        // registered put `POST /admin/appointments` on a controller with no
+        // `store()` method, so the route answered 500 rather than 404. Nothing
+        // linked to it, which is exactly why it survived: a route nothing links
+        // to is only ever exercised by the tests, and no test posted to it.
         Route::resource('appointments', AdminAppointmentController::class)
-            ->except(['create', 'destroy'])
+            ->except(['create', 'store', 'destroy'])
             ->middleware('admin.role:admin.appointments.manage');
 
         // Archive and permanent delete. Both re-check the status server-side in
@@ -339,6 +375,17 @@ Route::prefix('admin')->name('admin.')->group(function () {
         Route::get('/appointments-archived', [AdminAppointmentController::class, 'archived'])
             ->middleware('admin.role:admin.appointments.manage')
             ->name('appointments.archived');
+
+        // The working list's poller: the current state of the rows it is showing,
+        // so a status change made anywhere — this tab, another tab, another admin
+        // — redraws the row that changed instead of waiting for a page load.
+        //
+        // Declared here for the same reason `archived` is: a literal
+        // `appointments/row-state` would otherwise be swallowed by the resource's
+        // `{appointment}` parameter, which is declared above it.
+        Route::get('/appointments-row-state', [AdminAppointmentController::class, 'rowStates'])
+            ->middleware('admin.role:admin.appointments.manage')
+            ->name('appointments.row-state');
 
         // Bulk restore from the archive screen's select-all. Declared alongside
         // the literal `archived` path above because it is the same kind of
@@ -447,11 +494,30 @@ Route::prefix('admin')->name('admin.')->group(function () {
             ->middleware('admin.role:admin.tags.manage')
             ->name('tags.update');
 
-        // Admin Flow 8 — Calendar & Blocked Dates used to live here: the month
-        // grid, the block dialog and the salon-settings form. All of it went with
-        // the feature. Operating hours still exist and still drive booking — they
-        // live in `salon_settings` and are read by `BookingAvailability` — but
-        // there is no screen for editing them, and no blocked-date table.
+        // Admin Flow 8 — Calendar & Blocked Slots.
+        //
+        // The specific-date half of "when is the salon open": a month grid, and
+        // the ranges behind each day. The recurring half — the weekly schedule,
+        // the slot length, the booking window — is configuration rather than a
+        // record, and lives in `salon_settings`, which `BookingAvailability` reads
+        // on every request. It has no admin screen: see the note in
+        // `SalonSetting::current()`.
+        //
+        // `blocks` is declared before `blocks/{block}` for the same reason
+        // `read-all` sits above `{notification}/read` — a literal path declared
+        // after a parameter route is swallowed by it.
+        Route::get('/calendar', [CalendarController::class, 'index'])
+            ->middleware('admin.role:admin.calendar.manage')
+            ->name('calendar.index');
+        Route::post('/calendar/blocks', [CalendarController::class, 'store'])
+            ->middleware('admin.role:admin.calendar.manage')
+            ->name('calendar.store');
+        Route::patch('/calendar/blocks/{block}', [CalendarController::class, 'update'])
+            ->middleware('admin.role:admin.calendar.manage')
+            ->name('calendar.update');
+        Route::delete('/calendar/blocks/{block}', [CalendarController::class, 'destroy'])
+            ->middleware('admin.role:admin.calendar.manage')
+            ->name('calendar.destroy');
 
         // Admin Flow 9 — Registered Users Management.
         // The list is a register: customers register themselves, so there is no

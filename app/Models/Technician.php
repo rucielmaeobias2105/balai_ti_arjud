@@ -67,9 +67,15 @@ class Technician extends Model
         });
     }
 
+    /**
+     * `url()` and not `asset()`, for the reason set out on
+     * `User::profile_photo_url`: `asset()` builds from `APP_URL`, so a deployed
+     * site whose `APP_URL` still says `localhost` renders every technician photo
+     * as a request to the wrong origin.
+     */
     public function getPhotoUrlAttribute(): ?string
     {
-        return $this->photo_path ? asset('storage/'.$this->photo_path) : null;
+        return $this->photo_path ? url('storage/'.$this->photo_path) : null;
     }
 
     /**

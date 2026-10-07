@@ -70,14 +70,28 @@ class TermsModalTest extends TestCase
         }
     }
 
-    public function test_the_admin_panel_carries_the_same_dialog(): void
+    /**
+ * The admin dashboard carries no terms dialog.
+     *
+     * It used to, for the "Preview" link on the Terms screen. That link is gone,
+     * and nothing else in the panel opens the dialog — so the dashboard was
+     * paying for it: the component reads all three published policies and renders
+     * each through `TermsRenderer`, on every admin page, for markup no control
+     * on those pages can reach.
+     *
+     * The customer and auth layouts still mount it, and there the triggers are
+     * real; `test_every_customer_surface_that_links_the_terms_has_the_dialog`
+     * covers those.
+     */
+    public function test_the_admin_panel_does_not_carry_an_unreachable_dialog(): void
     {
         $html = $this->actingAs($this->makeAdmin(), 'admin')
             ->get(route('admin.dashboard'))
             ->assertOk()
             ->getContent();
 
-        $this->assertStringContainsString('termsModal(', $html);
+        $this->assertStringNotContainsString('termsModal(', $html);
+        $this->assertStringNotContainsString('id="terms-modal-title"', $html);
     }
 
     public function test_the_dialog_has_a_header_a_body_and_one_close_button(): void
@@ -158,6 +172,55 @@ class TermsModalTest extends TestCase
         $this->assertStringNotContainsString('target="_blank"', $html);
     }
 
+    /**
+     * The sign-in page offers the same two policies, the same way.
+     *
+     * It had no terms link at all: the only policies on that screen were
+     * reachable by typing the URL. The dialog was already mounted there — it
+     * comes from the shared auth layout — so all this adds is the triggers.
+     */
+    public function test_sign_in_offers_the_terms_without_navigating_away(): void
+    {
+        $html = $this->get(route('login'))->assertOk()->getContent();
+
+        $this->assertStringContainsString("\$dispatch('terms-modal', { category: 'booking' })", $html);
+        $this->assertStringContainsString("\$dispatch('terms-modal', { category: 'cancellation' })", $html);
+    }
+
+    /**
+     * Every shared layout roots an Alpine tree, and this is the whole fix.
+     *
+     * `Alpine.start()` initialises the elements matching `[x-data]` and walks
+     * each one's subtree. It does not walk from `<body>`. So a directive with
+     * no `x-data` ancestor is not "not working yet" — it is never initialised,
+     * silently, with no console error to find it by.
+     *
+     * The registration form's terms link was exactly that: `x-on:click.prevent`
+     * inside a `<form>` that had no `x-data`, so `preventDefault` was never
+     * bound, the click followed the real `href`, and a customer asking to read
+     * the terms before signing up was sent to a full page instead of a dialog.
+     *
+     * Asserted against the layouts rather than against pages because the
+     * invariant is layout-level: it holds for every screen that extends one,
+     * including the ones that add no `x-data` of their own.
+     */
+    public function test_every_shared_layout_roots_an_alpine_tree(): void
+    {
+        foreach (['auth', 'customer', 'admin'] as $layout) {
+            $source = (string) file_get_contents(
+                resource_path("views/layouts/{$layout}.blade.php")
+            );
+
+            $this->assertMatchesRegularExpression(
+                '/<body\b[^>]*\bx-data\b/s',
+                $source,
+                "layouts/{$layout}.blade.php must put x-data on the body. Alpine does not "
+                    .'walk from the body on its own, so without it every directive '
+                    .'outside some x-data subtree is silently never initialised.',
+            );
+        }
+    }
+
     public function test_the_cancel_and_reschedule_pages_no_longer_print_the_policy_inline(): void
     {
         $user = $this->makeUser();
@@ -190,15 +253,30 @@ class TermsModalTest extends TestCase
         );
     }
 
-    public function test_the_admin_preview_opens_the_dialog(): void
+    /**
+ * The Terms screen has no Preview trigger, and the panel mounts no dialog for
+ * one.
+ *
+ * There used to be a "Preview" pill in each card's header, linking to the shared
+ * dialog so an admin could see what a customer would get. It is gone: the page
+ * is the editing surface, the textarea beside it holds the same text, and
+ * `/terms/{category}` is the page a customer actually lands on.
+ *
+ * With the last trigger gone, mounting the dialog in the admin layout became
+ * cost with no benefit — it reads all three published policies and renders them
+ * on every admin page. So the panel no longer mounts it either, and this asserts
+ * both halves: nothing dispatches the dialog, and it is not in the page.
+ */
+public function test_the_admin_terms_page_has_no_preview_trigger_and_mounts_no_dialog(): void
     {
         $html = $this->actingAs($this->makeAdmin(), 'admin')
             ->get(route('admin.terms.index'))
             ->assertOk()
             ->getContent();
 
-        $this->assertStringContainsString("\$dispatch('terms-modal', { category: 'booking' })", $html);
-        $this->assertStringNotContainsString('target="_blank"', $html);
+        $this->assertStringNotContainsString("\$dispatch('terms-modal'", $html);
+        $this->assertStringNotContainsString('>Preview<', $html);
+        $this->assertStringNotContainsString('id="terms-modal-title"', $html);
     }
 
     /* ------------------------------------------------------------------ */

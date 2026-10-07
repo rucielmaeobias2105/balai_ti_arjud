@@ -118,7 +118,7 @@ abstract class TestCase extends BaseTestCase
             'customer_name' => $user?->full_name ?? 'Walk In',
             'customer_phone' => '09171234567',
             'customer_email' => $user?->email,
-            'preferred_date' => today()->addDay(),
+            'preferred_date' => $this->bookableDate(1),
             'preferred_time' => '10:00',
             'total_amount' => (float) $service->price,
             'down_payment_status' => DownPaymentStatus::Unverified,

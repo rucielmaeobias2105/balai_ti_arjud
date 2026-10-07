@@ -51,52 +51,68 @@ class TermsController extends Controller
         ]);
     }
 
-    /**
-     * A save overwrites the category's row rather than appending a new one.
-     */
-    public function store(Request $request): RedirectResponse
-    {
-        $data = $request->validate([
-            'category' => ['required', Rule::in(TermsCategory::values())],
-            'content' => ['required', 'string', 'min:10'],
-            'is_published' => ['nullable', 'boolean'],
+/**
+ * A save writes the text. It does not publish.
+ *
+ * Publishing is a separate action — `publish()`, below — because that is the
+ * only honest shape for the question an admin is actually asking. "I have
+ * edited the terms" and "I have decided customers should now see this version"
+ * are two different decisions, and folding the second into the first means every
+ * typo fix silently changes what the public is reading.
+ *
+ * This matters most here, where a policy is one row and not a history: with the
+ * `is_published` checkbox still on this form, saving an edit to a live policy
+ * sent `is_published` as false and quietly took the policy down. The checkbox is
+ * gone from this page for the same reason.
+ */
+public function store(Request $request): RedirectResponse
+{
+    $data = $request->validate([
+        'category' => ['required', Rule::in(TermsCategory::values())],
+        'content' => ['required', 'string', 'min:10'],
+    ]);
+
+    $category = TermsCategory::from($data['category']);
+    $existing = TermsAndCondition::forCategory($category);
+
+    if ($existing && $existing->content === $data['content']) {
+        return back()->withInput()->withErrors([
+            'content' => 'This is identical to the current saved text.',
         ]);
+    }
 
-        $category = TermsCategory::from($data['category']);
-        $publish = $request->boolean('is_published');
-        $existing = TermsAndCondition::forCategory($category);
+    $term = DB::transaction(function () use ($data, $category, $request, $existing) {
+        /*
+         * Publication state is carried across untouched.
+         *
+         * A live row keeps `is_published` and its original `published_at`, so
+         * editing the text does not unpublish the policy and does not rewrite the
+         * date the customer-facing version last went live. A brand new row starts
+         * unpublished and is published by the button beside it.
+         */
+        $attributes = [
+            'category' => $category,
+            'content' => $data['content'],
+            'is_published' => $existing?->is_published ?? false,
+            'published_at' => $existing?->published_at,
+            'created_by' => $existing?->created_by ?? $request->user('admin')->id,
+        ];
 
-        if ($existing && $existing->content === $data['content'] && $existing->is_published === $publish) {
-            return back()->withInput()->withErrors([
-                'content' => 'This is identical to the current saved text.',
-            ]);
+        if ($existing) {
+            $existing->update($attributes);
+
+            return $existing;
         }
 
-        $term = DB::transaction(function () use ($data, $category, $publish, $request, $existing) {
-            // A row that was published keeps its original `published_at`, so the
-            // date the customer-facing text last became live is not silently
-            // rewritten every time an admin saves an unrelated tweak.
-            $attributes = [
-                'category' => $category,
-                'content' => $data['content'],
-                'is_published' => $publish,
-                'published_at' => $publish ? ($existing?->published_at ?? now()) : null,
-                'created_by' => $existing?->created_by ?? $request->user('admin')->id,
-            ];
+        return TermsAndCondition::create($attributes);
+    });
 
-            if ($existing) {
-                $existing->update($attributes);
-
-                return $existing;
-            }
-
-            return TermsAndCondition::create($attributes);
-        });
-
-        return redirect()
-            ->route('admin.terms.index')
-            ->with('status', "{$category->label()} terms saved.");
-    }
+    return redirect()
+        ->route('admin.terms.index')
+        ->with('status', $term->is_published
+            ? "{$category->label()} terms saved and still live for customers."
+            : "{$category->label()} terms saved. Publish when you are ready.");
+}
 
     public function edit(TermsAndCondition $term): View
     {
@@ -160,14 +176,42 @@ class TermsController extends Controller
         return back()->with('status', "{$category->label()} terms saved.");
     }
 
-    public function publish(TermsAndCondition $term): RedirectResponse
-    {
-        DB::transaction(function () use ($term) {
-            $term->update(['is_published' => true, 'published_at' => now()]);
-        });
+/**
+ * Publish a policy to customers, retiring whatever was published before it.
+ *
+ * This is the action the checkbox was pretending to be, and it is deliberately
+ * not a checkbox: publishing is a decision, and a decision is a button somebody
+ * presses on purpose.
+ *
+ * `publishedFor()` reads the first published row for a category and
+ * `terms_and_conditions` has a unique index on `category`, so today there is
+ * only ever one row per policy and the "retire the previous version" half of
+ * this is a no-op. It is written anyway, for the installs where it is not: a
+ * database that still carries a superseded row from before that index existed
+ * would have `publishedFor()` return whichever of the two came back first, and
+ * two rows both claiming to be live is precisely the state publishing is
+ * supposed to prevent. The `updating` sweep is one extra UPDATE on a table that
+ * holds three short documents.
+ */
+public function publish(TermsAndCondition $term): RedirectResponse
+{
+    DB::transaction(function () use ($term) {
+        TermsAndCondition::query()
+            ->where('category', $term->category)
+            ->whereKeyNot($term->getKey())
+            ->update([
+                'is_published' => false,
+                'published_at' => null,
+            ]);
 
-        return back()->with('status', "{$term->category->label()} terms are now live for customers.");
-    }
+        $term->update([
+            'is_published' => true,
+            'published_at' => now(),
+        ]);
+    });
+
+    return back()->with('status', "{$term->category->label()} terms are now live for customers.");
+}
 
     public function destroy(TermsAndCondition $term): RedirectResponse
     {

@@ -17,10 +17,10 @@ use Tests\TestCase;
  * moves one leaves a date bookable in the UI but not in the database, or the
  * reverse.
  *
- * What went with the Calendar & Blocked Dates feature: the blocked-date cases,
- * the admin calendar's chip tests, and the toasts only the calendar's own actions
- * raised. `CalendarRemovalTest` covers the removal itself — that no screen can
- * block a date, and that booking still enforces every rule that is left.
+ * The blocked-date cases went with the Calendar & Blocked Dates feature and have
+ * come back in a different shape: whole-day closures now disable a date, and a
+ * partial closure greys individual times out of the dropdown. `BlockedSlotsTest`
+ * covers those, including the server-side refusal behind the greyed-out option.
  *
  * The category-colour tests stay. The colour a category resolves to is still a
  * property of the category row and the category screen still uses it, even though
@@ -80,6 +80,12 @@ class BookingRulesTest extends TestCase
      * half-hourly 16:30 a 30-minute interval would produce. Asserted against the
      * fixture's own interval rather than a literal, so changing it does not mean
      * rewriting the expectation.
+     *
+     * The grid is then compared slot-for-slot against the opening window minus
+     * the lunch break, rather than by counting. A count had to know how many
+     * starts the interval produced *and* how many of them lunch took — one on an
+     * hourly grid, two on a half-hourly one — so it broke whenever either changed.
+     * Listing them is both exact and independent of both.
      */
     public function test_every_day_offers_the_same_slots_up_to_closing(): void
     {
@@ -95,7 +101,23 @@ class BookingRulesTest extends TestCase
         // time minus one step. Adding the step back gives the closing time,
         // which is what proves no slot is offered past closing.
         $this->assertSame($hours[1], Carbon::parse(end($reference))->addMinutes($step)->format('H:i'));
-        $this->assertCount((int) (substr($hours[1], 0, 2) - substr($hours[0], 0, 2)), $reference);
+
+        // The whole opening window, less the lunch break, and nothing else.
+        $day = today()->addDay()->format('Y-m-d');
+        $cursor = Carbon::createFromFormat('Y-m-d H:i', $day.' '.$hours[0]);
+        $close = Carbon::createFromFormat('Y-m-d H:i', $day.' '.$hours[1]);
+        $window = [];
+
+        while ($cursor->lt($close)) {
+            $window[] = $cursor->format('H:i');
+            $cursor->addMinutes($step);
+        }
+
+        $this->assertSame(
+            array_values(array_filter($window, fn ($slot) => ! $settings->isTimeDuringBreak($slot))),
+            $reference,
+            'The offered slots should be the whole opening window bar the lunch break.',
+        );
 
         foreach (SalonSetting::dayNames() as $day) {
             $this->assertSame(
@@ -148,21 +170,33 @@ class BookingRulesTest extends TestCase
     }
 
     /**
-     * The input's own `min`, so the browser greys today and the past out rather
-     * than letting the customer pick a date that will be refused on submit.
+     * The booking window the picker is given, so the calendar cannot offer a
+     * date the server would refuse.
+     *
+     * This used to be asserted against the native date input's own `min`/`max`
+     * attributes. The picker draws its own day cells now, so there is no
+     * browser picker left to bound — the window reaches the panel through the
+     * config node instead, and `dayState()` is what acts on it. Same rule, new
+     * carrier.
      */
-    public function test_the_booking_form_min_is_tomorrow(): void
+    public function test_the_booking_picker_is_bounded_by_the_booking_window(): void
     {
         // Signed in, because `/book` is behind the customer guard — an
         // unauthenticated request is redirected to the login screen and asserts
-        // nothing about the date input.
+        // nothing about the picker.
         $html = $this->actingAs($this->makeUser())
             ->get(route('appointments.create'))
             ->assertOk()
             ->getContent();
 
-        $this->assertStringContainsString('min="'.today()->addDay()->toDateString().'"', $html);
-        $this->assertStringContainsString('max="'.BookingAvailability::make()->lastBookableDate()->toDateString().'"', $html);
+        preg_match('/<script type="application\/json" id="bta-booking-config">(.*?)<\/script>/s', $html, $matches);
+
+        $this->assertNotEmpty($matches, 'The booking page must ship its config node.');
+
+        $config = json_decode(html_entity_decode($matches[1], ENT_QUOTES), true);
+
+        $this->assertSame(today()->addDay()->toDateString(), $config['minDate']);
+        $this->assertSame(BookingAvailability::make()->lastBookableDate()->toDateString(), $config['maxDate']);
     }
 
     public function test_booking_for_today_is_rejected_by_the_server(): void
@@ -522,7 +556,7 @@ class BookingRulesTest extends TestCase
             'customer_phone' => '09171234567',
             'preferred_date' => $date,
             'preferred_time' => '10:00',
-            // Step 5 asks a first-timer what they had done before, and these
+            // Step 4 asks a first-timer what they had done before, and these
             // tests post as one. `BookingRulesTest` is about date rules, so the
             // answer is a fixed string rather than anything meaningful.
             'last_services_availed_note' => 'Glow Manicure',

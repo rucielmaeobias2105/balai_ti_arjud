@@ -209,8 +209,10 @@
 
     Pushed onto `head`/`scripts` rather than added to the layout: this is the only
     screen that needs it, and 37 KB on every page to serve one dialog is not worth
-    it. `x-on:click` on this page's Alpine directives is deliberate — Blade
-    compiles `@click` and leaves it as inert text.
+    it. `x-on:click` on this page's Alpine directives is a house convention rather
+    than a necessity — Alpine does accept `@click` as a shorthand for `x-on:click`
+    (it registers `@` as a prefix), so both work — but the spelled-out form is
+    what the rest of this page uses and what a reader can grep for.
 --}}
 @push('head')
     <link rel="stylesheet" href="{{ asset('vendor/cropper/cropper.min.css') }}">

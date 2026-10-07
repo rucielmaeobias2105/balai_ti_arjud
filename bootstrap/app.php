@@ -13,7 +13,7 @@ use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Validation\ValidationException;
 
-return Application::configure(basePath: dirname(__DIR__))
+$app = Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
         web: __DIR__.'/../routes/web.php',
         commands: __DIR__.'/../routes/console.php',
@@ -89,3 +89,25 @@ return Application::configure(basePath: dirname(__DIR__))
             return null;
         });
     })->create();
+
+/*
+| Shared hosting, where the document root is fixed and cannot be pointed at
+| `public/`. InfinityFree serves the account's `htdocs` folder and offers no way
+| to change that, so tools/package-infinityfree.ps1 hoists the contents of
+| `public/` into `htdocs` itself and drops the framework beside it, in
+| `htdocs/laravel`. A checkout served that way has no `public/` directory at
+| all, which is what this keys off: present means the ordinary layout and
+| nothing changes, absent means the parent of the application root is the web
+| root.
+|
+| This is not cosmetic. `public_path()` is what `@vite` reads the build
+| manifest from and what the `public` disk in config/filesystems.php writes
+| uploads into. Left pointing at a directory the web server never serves, every
+| stylesheet, every script and every uploaded image resolves to a 404 while the
+| application reports no error at all.
+*/
+if (! is_dir($app->publicPath())) {
+    $app->usePublicPath(dirname($app->basePath()));
+}
+
+return $app;

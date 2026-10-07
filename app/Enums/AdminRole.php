@@ -52,6 +52,22 @@ enum AdminRole: string
             'reports.view',
             'promos.manage',
             'messages.manage',
+            /*
+             * One ability, for the calendar of one-off closures.
+             *
+             * No `*.view` twin, unlike the catalogue and the technician roster.
+             * Those have one because they are lists with a natural read-only
+             * reading — an admin can be shown the price list without being able to
+             * change it. The calendar is not that: every action on it is an edit,
+             * so a read-only version would be a screen an admin could look at and
+             * not act on, which is the situation the split exists to avoid.
+             *
+             * There is deliberately no settings ability. The recurring schedule is
+             * configuration in `salon_settings`, read by `BookingAvailability` on
+             * every request; it has no admin screen, so there is nothing for an
+             * ability to gate.
+             */
+            'calendar.manage',
         ];
     }
 

@@ -64,6 +64,12 @@
         'System' => [
             ['route' => 'admin.terms.index', 'label' => 'Terms & Conditions', 'icon' => 'heroicon-o-document-text', 'active' => 'terms', 'ability' => 'admin.terms.view'],
             ['route' => 'admin.reports.index', 'label' => 'Reports', 'icon' => 'heroicon-o-chart-bar', 'active' => 'reports', 'ability' => 'admin.reports.view'],
+            // Calendar only. The recurring schedule — opening hours, slot length,
+            // booking window — is configuration in `salon_settings` rather than a
+            // record, and has no screen here. One-off closures are records with
+            // rows an admin adds and removes, which is exactly what a sidebar item
+            // is for.
+            ['route' => 'admin.calendar.index', 'label' => 'Calendar', 'icon' => 'heroicon-o-calendar', 'active' => 'calendar', 'ability' => 'admin.calendar.manage'],
         ],
     ];
 @endphp

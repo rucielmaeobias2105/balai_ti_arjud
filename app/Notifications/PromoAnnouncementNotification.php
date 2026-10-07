@@ -14,11 +14,23 @@ class PromoAnnouncementNotification extends Notification
 {
     use Queueable;
 
-    public function __construct(public readonly Promo $promo) {}
+    /**
+     * @param  bool  $withMail  Whether this recipient should also be emailed.
+     *
+     * The database half is the announcement; the mail half is a copy of it.
+     * They are separable because the request that sends them has a finite
+     * budget on shared hosting — see `PromoController::announce()` — and
+     * "every customer saw the promo" must not depend on how long a mail
+     * server took to answer for the customer before them.
+     */
+    public function __construct(
+        public readonly Promo $promo,
+        public readonly bool $withMail = true,
+    ) {}
 
     public function via(object $notifiable): array
     {
-        return ['database', 'mail'];
+        return $this->withMail ? ['database', 'mail'] : ['database'];
     }
 
     public function toArray(object $notifiable): array

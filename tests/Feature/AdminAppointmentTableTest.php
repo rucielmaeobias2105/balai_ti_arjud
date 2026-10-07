@@ -88,14 +88,214 @@ class AdminAppointmentTableTest extends TestCase
             ->assertOk()
             ->getContent();
 
-        // Exactly one icon action per row, and it opens the dialog rather than
-        // navigating. `x-ui.icon-action` renders the icon as SVG, so counting
-        // the component's own class is what distinguishes one action from two.
-        $this->assertSame(1, substr_count($html, 'class="icon-action'));
+        // View is the only action a booking that is still happening offers, and
+        // it opens the dialog rather than navigating.
         $this->assertStringContainsString("\$dispatch('view-appointment', {$appointment->id})", $html);
+
+        // Archive and Delete are rendered for every row now and revealed by the
+        // row's scope when the status permits them, so the count of rendered
+        // actions is no longer the count of visible ones — what has to hold is
+        // that the flags start out false for a booking still in progress.
+        $this->assertStringContainsString('x-show="canArchive"', $html);
+        $this->assertStringContainsString('x-show="canDelete"', $html);
+        $this->assertStringContainsString('canArchive: false', $html);
+        $this->assertStringContainsString('canDelete: false', $html);
+
+        // Hidden without JavaScript too, rather than shown and inert.
+        foreach (['canArchive', 'canDelete'] as $flag) {
+            $this->assertSame(
+                1,
+                preg_match('/<a(?=[^>]*x-show="'.$flag.'")(?=[^>]*x-cloak)[^>]*>/', $html),
+                "The {$flag} button must carry x-cloak as well as x-show.",
+            );
+        }
 
         // Nothing in the table links straight to the Manage screen any more.
         $this->assertStringNotContainsString('href="'.route('admin.appointments.show', $appointment), $html);
+    }
+
+    /**
+     * The flags a row's Archive and Delete buttons are bound to are seeded from
+     * the same model methods the routes re-check.
+     *
+     * This is the half of the live row actions that has to be right before the
+     * browser is involved: the page decides what is on offer, and the poller and
+     * the status save can only correct it afterwards. A flag that disagreed with
+     * `canBeArchivedByAdmin()` would mean a row offering an action the route
+     * refuses — or hiding one it would allow.
+     */
+    public function test_row_actions_are_seeded_from_the_models_own_rules(): void
+    {
+        $admin = $this->makeAdmin();
+        $user = $this->makeUser();
+
+        $live = $this->makeAppointment($user);
+        $completed = $this->makeAppointment($user, null, [
+            'status' => AppointmentStatus::Completed,
+        ]);
+
+        $html = $this->actingAs($admin, 'admin')
+            ->get(route('admin.appointments.index'))
+            ->assertOk()
+            ->getContent();
+
+        foreach ([$live, $completed] as $appointment) {
+            $this->assertStringContainsString(
+                'canArchive: '.($appointment->canBeArchivedByAdmin() ? 'true' : 'false'),
+                $html,
+                'The seeded Archive flag must be the model\'s own answer.',
+            );
+            $this->assertStringContainsString(
+                'canDelete: '.($appointment->canBeDeletedByAdmin() ? 'true' : 'false'),
+                $html,
+                'The seeded Delete flag must be the model\'s own answer.',
+            );
+        }
+
+        // The completed booking is the one that offers them.
+        $this->assertMatchesRegularExpression(
+            '/id: '.$completed->id.'.*?canArchive: true.*?canDelete: true/s',
+            $html,
+        );
+    }
+
+    /**
+     * The live-update contract, as the page has to present it to the browser.
+     *
+     * The whole point of the row's scope is that the status dropdown and the two
+     * buttons beside it are two readings of one fact, so they are set up from one
+     * payload and repainted together. These are the attributes that make that
+     * true; without them the row would reload, or update half of itself.
+     */
+    public function test_the_row_is_scoped_so_its_status_and_actions_agree(): void
+    {
+        $admin = $this->makeAdmin();
+        $appointment = $this->makeAppointment($this->makeUser());
+
+        $html = $this->actingAs($admin, 'admin')
+            ->get(route('admin.appointments.index'))
+            ->assertOk()
+            ->getContent();
+
+        // The scope is the row itself, so the dropdown's cell and the actions'
+        // cell share it.
+        $this->assertMatchesRegularExpression(
+            '/<tr[^>]*data-appointment-row="'.$appointment->id.'"[^>]*x-data="appointmentStatus\(/s',
+            $html,
+            'The Alpine scope must be on the row, not on one of its cells.',
+        );
+
+        // Every field the repaint needs comes from the server with the page, so
+        // the first paint and every later one are drawn from the same place.
+        foreach (['id:', 'endpoint:', 'current:', 'badge:', 'locked:', 'choices:', 'canArchive:', 'canDelete:'] as $field) {
+            $this->assertStringContainsString($field, $html, "The row is missing {$field}");
+        }
+
+        // The poll's answer reaches the row, and only the row it names.
+        $this->assertStringContainsString('x-on:admin-appointment-row.window="if ($event.detail.id === id) apply($event.detail)"', $html);
+
+        // The select is the thing `repaint()` rewrites, so it has to be
+        // reachable by reference rather than re-queried.
+        $this->assertStringContainsString('x-ref="select"', $html);
+
+        // And nothing here reloads the page any more. Scoped to this
+        // component, because a reload is a legitimate answer elsewhere in the
+        // app and this assertion is about what happens after a status save.
+        $this->assertSame(
+            1,
+            preg_match(
+                "/Alpine\.data\('appointmentStatus'.*?\n    \}\)\);/s",
+                $js = file_get_contents(resource_path('js/app.js')),
+                $match,
+            ),
+            'Could not find the appointmentStatus component in app.js.',
+        );
+        $this->assertStringNotContainsString('window.location.reload()', $match[0]);
+        $this->assertStringContainsString('apply(', $match[0]);
+        $this->assertStringContainsString('repaint(', $match[0]);
+    }
+
+    /**
+     * The page has to be able to ask what changed, and the answer is scoped to
+     * the rows actually on screen.
+     *
+     * Without a poller, "appears automatically" would only be true for the tab
+     * that made the change: an admin watching a list somebody else is working on
+     * would still be looking at rows in a form that no longer exists. With a
+     * poller taking every id on the page, the same repaint covers both.
+     */
+    public function test_the_list_polls_for_the_state_of_the_rows_it_shows(): void
+    {
+        $admin = $this->makeAdmin();
+        $appointment = $this->makeAppointment($this->makeUser());
+
+        $html = $this->actingAs($admin, 'admin')
+            ->get(route('admin.appointments.index'))
+            ->assertOk()
+            ->getContent();
+
+        $this->assertStringContainsString('appointmentRows({', $html);
+        $this->assertStringContainsString(
+            // `@js()` escapes slashes, so the URL appears in the markup in the
+            // JavaScript-safe form rather than as it reads in `route()`.
+            'endpoint: \''.str_replace('/', '\/', route('admin.appointments.row-state')).'\'',
+            $html,
+            'The poller must be pointed at the row-state endpoint.',
+        );
+
+        // And the endpoint answers for the ids it is given.
+        $response = $this->actingAs($admin, 'admin')
+            ->getJson(route('admin.appointments.row-state', ['ids' => [$appointment->id]]))
+            ->assertOk();
+
+        $response->assertJsonStructure([
+            'rows' => [
+                (string) $appointment->id => [
+                    'status', 'label', 'badge', 'choices', 'can_archive', 'can_delete', 'locked',
+                ],
+            ],
+            'counts',
+        ]);
+
+        $this->assertSame(
+            $appointment->canBeArchivedByAdmin(),
+            $response->json('rows.'.$appointment->id.'.can_archive'),
+        );
+        $this->assertSame(
+            $appointment->canBeDeletedByAdmin(),
+            $response->json('rows.'.$appointment->id.'.can_delete'),
+        );
+    }
+
+    /** A status change answers with the row's new state, not just "ok". */
+    public function test_a_status_change_answers_with_the_rows_new_state(): void
+    {
+        $admin = $this->makeAdmin();
+        $appointment = $this->makeAppointment($this->makeUser());
+
+        $response = $this->actingAs($admin, 'admin')
+            ->patchJson(route('admin.appointments.status', $appointment), [
+                'status' => AppointmentStatus::Completed->value,
+            ])
+            ->assertOk();
+
+        // These three are the response. The browser is not asked to work out
+        // what completing a booking permits — it is told, which is what puts the
+        // two buttons on the row without a reload.
+        $this->assertTrue($response->json('row.can_archive'));
+        $this->assertTrue($response->json('row.can_delete'));
+        $this->assertTrue($response->json('row.locked'));
+
+        // And the dropdown's menu comes back with it, so the control stops
+        // offering transitions the booking has just refused for good.
+        $this->assertSame(
+            $appointment->refresh()->status->value,
+            $response->json('row.status'),
+        );
+
+        // The tab counts ride along, or the page would describe the list as it
+        // was a moment ago.
+        $this->assertIsArray($response->json('counts'));
     }
 
     public function test_the_view_dialog_shows_the_technician(): void
@@ -357,8 +557,13 @@ class AdminAppointmentTableTest extends TestCase
             'The status control must be disabled on a completed row.',
         );
 
-        // And it must say why, so a dead dropdown is not read as a bug.
-        $this->assertStringContainsString('A completed service is final', $html);
+        // And it must not explain itself. The note that used to sit under a
+        // locked dropdown is gone, so this asserts its absence rather than its
+        // presence: it was a sentence about a status rule repeated on every
+        // completed row of a long list, and the status it described is already
+        // written down once, in the enum. What is left on the row is the control
+        // itself.
+        $this->assertStringNotContainsString('A completed service is final', $html);
 
         // Every other status keeps a live control.
         $this->assertSame(1, preg_match_all('/<select[^>]*name="status"/', $html));
@@ -516,9 +721,18 @@ class AdminAppointmentTableTest extends TestCase
 
         // The payload is embedded in the page, so the dialog opens with no
         // request of its own.
-        foreach (['Gelish Manicure', '90 min', 'Shellac allergy', 'Prefers a quiet room', 'Gelish last May', '2:30 PM'] as $expected) {
+        //
+        // The line under each service is the quantity and the advertised price,
+        // not a duration: these rows' durations are zeros that were never
+        // filled in, and "0 min" reads as a measurement. `90 min` here used to be
+        // asserted; the duration is gone from the payload, so asserting the
+        // quantity instead is asserting the thing the dialog actually shows.
+        foreach (['Gelish Manicure', 'Qty 1', 'Shellac allergy', 'Prefers a quiet room', 'Gelish last May', '2:30 PM'] as $expected) {
             $this->assertStringContainsString($expected, $html);
         }
+
+        // …and the duration really is gone, even for the line that has one.
+        $this->assertStringNotContainsString('90 min ·', $html);
 
         $this->assertStringContainsString(today()->addDays(3)->format('l, M j, Y'), $html);
     }

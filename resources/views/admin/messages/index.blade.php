@@ -103,12 +103,18 @@
                                 >Mark read</button>
                             @endunless
 
-                            <form method="POST" action="{{ route('admin.messages.destroy', $message) }}"
-                                  onsubmit="return confirm('Delete this message?')">
-                                @csrf
-                                @method('DELETE')
-                                <button type="submit" class="btn-danger btn-sm">Delete</button>
-                            </form>
+                            {{-- A button that asks rather than a form that asks.
+                                 The one dialog below owns the real form, the CSRF
+                                 token and the DELETE spoof, so this row carries no
+                                 form of its own — which is also why the sentence
+                                 names the count instead of the sender: "Delete 1
+                                 message?" does not put a customer's name in a
+                                 prompt that can be misread. --}}
+                            <button
+                                type="button"
+                                class="btn-danger btn-sm"
+                                x-on:click="$dispatch('confirm-delete-message', { id: {{ $message->id }}, action: @js(route('admin.messages.destroy', $message)) })"
+                            >Delete</button>
                         </div>
                     </div>
 
@@ -134,4 +140,17 @@
 
         <div class="mt-6">{{ $messages->links() }}</div>
     @endif
+
+    {{-- One dialog for every message. Replaces the per-row
+         `onsubmit="return confirm('Delete this message?')"`, which put the
+         browser's own unstyleable dialog in the middle of the inbox. --}}
+    <x-ui.confirm-dialog
+        title="Delete this message?"
+        event="confirm-delete-message"
+        verb="Delete"
+        subject="message"
+        warning="It will be removed from the inbox for good."
+        confirm-label="Yes, delete it"
+        cancel-label="Cancel"
+    />
 @endsection

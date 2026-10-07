@@ -70,7 +70,8 @@
                                         icon="heroicon-o-trash"
                                         tone="danger"
                                         :action="route('admin.technicians.destroy', $technician)"
-                                        :confirm="'Delete “'.$technician->name.'”? Their existing bookings are kept.'"
+                                        :confirm="$technician->name"
+                                        confirm-event="confirm-delete-technician"
                                     />
                                 </div>
                             </td>
@@ -93,4 +94,16 @@
             </tbody>
         </table>
     </x-ui.admin-table>
+
+    {{-- The consequence is stated because it is the question an admin is actually
+         asking: "will deleting them cancel their bookings?" It does not. --}}
+    <x-ui.confirm-dialog
+        title="Delete this technician?"
+        event="confirm-delete-technician"
+        verb="Delete"
+        subject="technician"
+        warning="Their existing bookings are kept."
+        confirm-label="Yes, delete it"
+        cancel-label="Cancel"
+    />
 @endsection

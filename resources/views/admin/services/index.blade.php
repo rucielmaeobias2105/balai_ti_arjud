@@ -59,15 +59,26 @@
                                         tone="primary"
                                         :href="route('admin.services.edit', $service)"
                                     />
-                                    <button
-                                        type="button"
-                                        class="icon-action icon-action-danger"
-                                        title="Delete {{ $service->name }}"
-                                        aria-label="Delete {{ $service->name }}"
-                                        x-on:click.prevent="$dispatch('confirm-delete-service', { id: {{ $service->id }}, name: @js($service->name) })"
-                                    >
-                                        <x-heroicon-o-trash class="h-4 w-4" />
-                                    </button>
+                                    {{-- The concrete delete URL rides along in the event rather
+                                         than the row announcing an id for a shared template
+                                         to be filled in. One dialog serves the whole table
+                                         either way, but this way the URL is never guessed:
+                                         Blade renders it from the same route the form posts
+                                         to, so there is no placeholder left to resolve wrong.
+
+                                         It used to pass `id` against a `{id}` template on the
+                                         dialog, and the first row to open it consumed that
+                                         placeholder — so every row after it posted the first
+                                         service's DELETE, which 404s once that service is
+                                         soft-deleted. See `confirmDialog.ask()`. --}}
+                                    <x-ui.icon-action
+                                        label="Delete {{ $service->name }}"
+                                        icon="heroicon-o-trash"
+                                        tone="danger"
+                                        :action="route('admin.services.destroy', $service)"
+                                        :confirm="$service->name"
+                                        confirm-event="confirm-delete-service"
+                                    />
                                 </div>
                             </td>
                         @endcan
@@ -96,18 +107,15 @@
          trash action used to raise.
 
          One dialog for the whole table rather than a form per row: the trash
-         button dispatches the row's id and `confirmDialog.ask()` resolves `{id}`
-         in the action template when the event fires. That keeps this to a single
+         button dispatches the row's delete URL and `confirmDialog.ask()` puts it
+         in the form's action when the event fires. That keeps this to a single
          CSRF token and a single `_method` spoof instead of one pair per service.
 
-         The `{id}` is appended *after* `route()` returns, which is what makes it
-         safe: passed inside `route()` the URL generator would scan the finished
-         path for `{parameter}` tokens and throw on a placeholder meant for
-         JavaScript. --}}
+         No `action` prop, because no caller can be assumed to supply one: every
+         row on this page is per-row, so the URL comes from the row. --}}
     <x-ui.confirm-dialog
         title="Delete service"
         event="confirm-delete-service"
-        :action="route('admin.services.index').'/{id}'"
         subject="service"
         warning="This removes the service from the catalogue. Bookings that already used it keep their saved details."
         title-id="confirm-delete-service-title"

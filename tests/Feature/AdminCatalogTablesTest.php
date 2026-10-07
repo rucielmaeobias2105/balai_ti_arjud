@@ -29,6 +29,20 @@ class AdminCatalogTablesTest extends TestCase
         return $this->makeAdmin();
     }
 
+    /**
+     * A URL as `@js()` writes it inside an Alpine attribute: single-quoted, with
+     * its slashes escaped, which is how `x-ui.icon-action` emits a per-row
+     * delete URL into its `x-on:click`.
+     *
+     * Needed because the escaped and unescaped spellings are not interchangeable
+     * in an assertion — `\/admin\/services\/7` is what actually renders, and
+     * asserting the plain URL against it would fail on a page that is correct.
+     */
+    private function jsUrl(string $url): string
+    {
+        return str_replace('/', '\\/', $url);
+    }
+
     /* ------------------------------------------------------------------ */
     /* Shared helpers */
     /* ------------------------------------------------------------------ */
@@ -175,8 +189,13 @@ class AdminCatalogTablesTest extends TestCase
      *
      * The trash button used to raise a native `confirm()`. It now dispatches
      * `confirm-delete-service`, and one `x-ui.confirm-dialog` at the foot of the
-     * page is the single form behind every row — so the id has to be resolved
-     * from the event rather than baked into a per-row URL.
+     * page is the single form behind every row — so the row's delete URL has to
+     * travel in the event rather than be baked into a per-row form.
+     *
+     * It used to announce an id instead, for a `{id}` placeholder on the dialog
+     * to be filled in. That was the 404: the first row to open the dialog
+     * consumed the placeholder, so every row after it posted the first service's
+     * DELETE, and route model binding answers 404 for a row already soft-deleted.
      */
     public function test_deleting_a_service_uses_the_shared_confirmation_dialog(): void
     {
@@ -191,19 +210,21 @@ class AdminCatalogTablesTest extends TestCase
 
         $html = $this->actingAs($admin, 'admin')->get('/admin/services')->assertOk()->getContent();
 
-        // The row's trash button dispatches an event carrying both the id and
-        // the name. Both render into the attribute — the id bare, the name in
-        // the single quotes @js() emits — and the name is what the dialog
-        // shows, so it has to travel with the event rather than live only on
-        // the button's title attribute.
+        // The row's trash button dispatches the event carrying its delete
+        // URL and the name. Both render into the attribute in the single quotes
+        // @js() emits, and the name is what the dialog shows, so it has to travel
+        // with the event rather than live only on the button's title attribute.
         $this->assertStringContainsString('confirm-delete-service', $html);
         $this->assertStringContainsString(
-            "id: {$service->id}, name: 'Glow Foot Spa'",
-            $html
+            'action: \''.$this->jsUrl(route('admin.services.destroy', $service))."', name: 'Glow Foot Spa'",
+            $html,
+            'The row should carry its own delete URL, so there is no placeholder left to resolve.',
         );
 
-        // One dialog for the whole table, with the id left as a placeholder for
-        // confirmDialog.ask() to resolve when the event fires.
+        // The placeholder that could only ever be resolved once is gone.
+        $this->assertStringNotContainsString('{id}', $html, 'No unresolved placeholder should remain on the page.');
+
+        // One dialog for the whole table, with the URL arriving on the event.
         $this->assertStringContainsString('Delete service', $html, 'The dialog should say what it is deleting.');
         // The labels render as button text, not as attributes.
         $this->assertMatchesRegularExpression('/>Yes</', $html);
@@ -224,6 +245,56 @@ class AdminCatalogTablesTest extends TestCase
             substr_count($html, 'name="_method" value="DELETE"'),
             'There should be one DELETE form behind the dialog, not one per row.',
         );
+    }
+
+    /**
+     * The 404, stated as a test: two rows, one shared dialog.
+     *
+     * Both trash buttons open the same dialog and therefore submit the same one
+     * form, so the URL has to be decided by whichever row was clicked. A
+     * placeholder consumed on the first open left every later row posting the
+     * first service's endpoint — which, once that service is soft-deleted, is a
+     * 404 rather than a delete. Asserting each row carries its own URL, and that
+     * the second service is still deletable, pins both halves down.
+     */
+    public function test_each_service_row_carries_its_own_delete_url(): void
+    {
+        $admin = $this->admin();
+
+        $first = Service::create([
+            'name' => 'Glow Foot Spa',
+            'slug' => 'glow-foot-spa-a',
+            'category' => 'Nail Care',
+            'price' => '799',
+            'duration_minutes' => 60,
+        ]);
+        $second = Service::create([
+            'name' => 'Brow Sculpt',
+            'slug' => 'brow-sculpt-b',
+            'category' => 'Nail Care',
+            'price' => '499',
+            'duration_minutes' => 45,
+        ]);
+
+        $html = $this->actingAs($admin, 'admin')->get('/admin/services')->assertOk()->getContent();
+
+        foreach ([$first, $second] as $service) {
+            $this->assertStringContainsString(
+                "action: '".$this->jsUrl(route('admin.services.destroy', $service))."'",
+                $html,
+                "{$service->name} should carry its own delete URL.",
+            );
+        }
+
+        // And the second row's URL is one that exists — the first row's is not
+        // reachable a second time.
+        $this->actingAs($admin, 'admin')
+            ->delete(route('admin.services.destroy', $second))
+            ->assertRedirect(route('admin.services.index'))
+            ->assertSessionHas('status', 'Service "Brow Sculpt" deleted.');
+
+        $this->assertSoftDeleted($second);
+        $this->assertNotSoftDeleted($first);
     }
 
     /** The dialog really deletes on Yes, and the row is soft-deleted. */

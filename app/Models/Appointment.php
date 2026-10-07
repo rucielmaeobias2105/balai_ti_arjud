@@ -20,6 +20,7 @@ class Appointment extends Model
 
     protected $fillable = [
         'reference_number',
+        'idempotency_key',
         'user_id',
         'customer_name',
         'customer_phone',

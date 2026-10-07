@@ -2,11 +2,12 @@
 
 namespace App\Http\Requests\Customer;
 
-use App\Enums\BookingPreference;
 use App\Services\BookingAvailability;
+use App\Services\BookingService;
 use App\Support\BookingHistory;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class StoreBookingRequest extends FormRequest
@@ -34,17 +35,23 @@ class StoreBookingRequest extends FormRequest
             'preferred_time' => ['required', 'date_format:H:i'],
 
             'allergies' => ['nullable', 'string', 'max:2000'],
-            'allergies_other' => ['nullable', 'string', 'max:2000'],
 
             /*
-             * Step 4's dropdown. Nullable on purpose: an untouched step should
+             * Step 3 is now a single free-text box and nothing else.
+             *
+             * There used to be an `allergy_preference` dropdown here, validated
+             * against a closed set so that a crafted payload could not write free
+             * text into the column through a field the panel rendered as a
+             * `<select>`. That reasoning went with the dropdown: this is the field
+             * the customer types their own words into, bounded by `max` the same
+             * way every other free-text field on this form is.
+             *
+             * Nullable on purpose, and always optional — an untouched step should
              * leave nothing on the booking, which is a different statement from
              * declaring that the customer has no allergies, and nothing here is
-             * worth refusing a booking over. Constrained to the closed set
-             * instead, so a crafted payload cannot write free text into the
-             * column through a field the panel renders as a `<select>`.
+             * worth refusing a booking over.
              */
-            'allergy_preference' => ['nullable', 'string', Rule::in(array_keys(BookingPreference::storedOptions()))],
+            'allergies_other' => ['nullable', 'string', 'max:2000'],
 
             /*
              * Required of a first-time customer, who has no record here for the
@@ -80,6 +87,23 @@ class StoreBookingRequest extends FormRequest
             'down_payment_reference' => ['nullable', 'string', 'max:64'],
 
             'agree_terms' => ['accepted'],
+
+            /*
+             * The duplicate-submission guard.
+             *
+             * Nullable, with no format rule. A `uuid` rule here would be the wrong
+             * shape: it fails the whole submission, so a client sending a malformed
+             * key would lose a booking over a field the customer never typed and
+             * never saw. A missing or unusable key just means this attempt has to
+             * rely on the throttle, and the booking still goes through.
+             *
+             * The value is normalised to null when it is not a UUID in
+             * `prepareForValidation()`, and checked again in `BookingService` before
+             * it reaches the column behind a unique index — two layers because the
+             * second one is the only thing standing between arbitrary text and a key
+             * somebody else could be made to collide with.
+             */
+            'idempotency_key' => ['nullable'],
         ];
     }
 
@@ -91,6 +115,7 @@ class StoreBookingRequest extends FormRequest
         $this->merge([
             'customer_name' => trim((string) $this->input('customer_name')),
             'customer_phone' => trim((string) $this->input('customer_phone')),
+            'idempotency_key' => $this->idempotencyKey(),
             'down_payment_reference' => $this->filled('down_payment_reference')
                 ? strtoupper(trim((string) $this->input('down_payment_reference')))
                 : null,
@@ -100,19 +125,54 @@ class StoreBookingRequest extends FormRequest
     }
 
     /**
-     * Step 4 — what the customer told us about their sensitivities.
+     * The idempotency key, or null when there isn't a usable one.
      *
-     * The dropdown's answer is stored as its sentence rather than its backing
-     * value, because `appointments.allergies` is read by people: an admin
-     * verifying a booking and the customer looking at their own history both see
-     * this column, and neither gains anything from `weak_or_brittle_nails`.
+     * Dropped rather than rejected. The field is invisible to the customer, so
+     * failing a booking over its contents would punish them for something they did
+     * not do — and the only thing a malformed key costs is the duplicate guard,
+     * which the throttle still backs up.
+     */
+    protected function idempotencyKey(): ?string
+    {
+        $key = $this->input('idempotency_key');
+
+        return is_string($key) && Str::isUuid($key) ? $key : null;
+    }
+
+    /**
+     * Has this exact booking already been made by this customer?
      *
-     * Two answers are deliberately not stored on their own. `None` is the absence
-     * of information, and writing "No known allergies or sensitivities" onto
-     * every booking that skipped the step would turn a blank into a claim. `Other`
-     * points at the free-text box, so on its own it says nothing — but if that
-     * box is empty the customer did pick it, so the label is kept as a hint that
-     * there is more to ask about.
+     * Asked before the availability rules run, so a replay is answered with the
+     * booking that exists rather than refused for wanting a slot the first one took.
+     */
+    public function isReplay(): bool
+    {
+        $key = $this->idempotencyKey();
+
+        if ($key === null) {
+            return false;
+        }
+
+        return app(BookingService::class)->resolveIdempotent($key, $this->user()?->id) !== null;
+    }
+
+    /**
+     * Step 3 — what the customer told us about their sensitivities.
+     *
+     * One free-text box, stored as typed.
+     *
+     * There used to be two inputs here and this method folded them together: a
+     * dropdown of fourteen fixed answers and a free-text box for the detail. The
+     * dropdown is gone, because a closed list of fourteen is the wrong shape for
+     * what people actually arrive with — "allergic to nickel, and my scalp reacts
+     * to strong fragrance" is one sentence, and no list of chips was ever going to
+     * hold it. So the note is now the whole answer, kept verbatim rather than
+     * assembled from a label and a sentence.
+     *
+     * Nothing here is required. That has not changed: the old dropdown and its box
+     * were both `nullable`, and forcing a health declaration in order to buy a
+     * manicure is not the salon's call to make. A blank box stores null rather
+     * than a claim that there is nothing to declare.
      *
      * The legacy `allergies[]` from the old checkbox grid is still folded in.
      * Nothing in the panel sends it now, but a cached page or a replayed request
@@ -120,18 +180,7 @@ class StoreBookingRequest extends FormRequest
      */
     protected function healthNote(): ?string
     {
-        $preference = BookingPreference::tryFromLabel($this->input('allergy_preference'));
         $note = trim((string) $this->input('allergies_other'));
-
-        $parts = [];
-
-        if ($preference) {
-            $parts[] = $preference === BookingPreference::Other && $note === ''
-                ? $preference->label()
-                : ($preference->isInformative() ? $preference->label() : '');
-        }
-
-        $parts = array_values(array_filter($parts));
 
         $legacy = collect((array) $this->input('allergies'))
             ->map(fn ($value) => trim((string) $value))
@@ -144,13 +193,9 @@ class StoreBookingRequest extends FormRequest
             $legacy = array_values(array_filter($legacy, fn ($v) => $v !== 'None known'));
         }
 
-        $parts = array_merge($parts, $legacy);
+        $parts = array_values(array_filter(array_merge($legacy, [$note])));
 
-        if ($note !== '') {
-            $parts[] = $note;
-        }
-
-        $merged = trim(implode(', ', array_filter($parts)));
+        $merged = trim(implode(', ', $parts));
 
         return $merged === '' ? null : $merged;
     }
@@ -237,6 +282,25 @@ class StoreBookingRequest extends FormRequest
     {
         $validator->after(function (Validator $validator) {
             /*
+             * A replay is not a fresh attempt, so none of the availability rules
+             * apply to it.
+             *
+             * This has to happen *here*, in the request, and not only in the
+             * controller. A double-tap's second request arrives after the first has
+             * committed, so by the time this form is validated the slot genuinely is
+             * taken — and the slot-taken rule below would refuse the replay with
+             * "That slot has just been taken. Please pick another time.", which is
+             * both wrong and the worst possible answer: the customer did nothing,
+             * picks another time, and books a second appointment for a treatment
+             * they only wanted once. The duplicate guard in the controller is
+             * still there for the request that arrives before the first commits;
+             * this is the one that arrives after.
+             */
+            if ($this->isReplay()) {
+                return;
+            }
+
+            /*
              * Bail only if the date or the time is *itself* already invalid.
              *
              * This used to bail on any error at all, which was free when the only
@@ -292,28 +356,22 @@ class StoreBookingRequest extends FormRequest
     /**
      * Surface the date rules as a toast as well as inline errors.
      *
-     * Amber rather than red: the customer filled the form correctly and the date
-     * is simply not one the salon takes bookings for. A red toast for a rule the
-     * date picker already greys out would read as a failure on their side.
+     * Both severities, and the difference is not cosmetic. A date that is simply not
+     * one the salon takes bookings for — a Sunday it always closes, a day inside the
+     * minimum-notice window — is a warning: the customer filled the form correctly
+     * and the answer is "not that one". A date or time an admin has blocked is
+     * different: the customer picked something the screen was showing as available,
+     * possibly from a page they left open before the block was saved, so as far as
+     * they are concerned the site offered them a slot and then took it away.
      *
-     * The minimum-notice message is the only one watched by constant. The others
-     * are wording about a closed day or the booking window, which read fine
-     * inline and would be noise repeated as a toast — and the blocked-date case
-     * went entirely with the feature that produced it.
+     * Which is which is decided by `BookingAvailability::toastFor()`, which the
+     * reschedule form asks too — the two refuse the same rules and cannot be allowed
+     * to describe them differently.
      */
     protected function failedValidation(Validator $validator): void
     {
-        $messages = $validator->errors()->all();
-
-        foreach ([BookingAvailability::MINIMUM_NOTICE_MESSAGE] as $watched) {
-            if (in_array($watched, $messages, true)) {
-                session()->flash('toast', [
-                    'type' => 'warning',
-                    'message' => $watched,
-                ]);
-
-                break;
-            }
+        if ($toast = BookingAvailability::toastFor($validator->errors()->all())) {
+            session()->flash('toast', $toast);
         }
 
         parent::failedValidation($validator);

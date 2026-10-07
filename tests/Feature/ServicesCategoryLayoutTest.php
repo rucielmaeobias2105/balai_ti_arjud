@@ -627,7 +627,7 @@ class ServicesCategoryLayoutTest extends TestCase
     /* 3. Each line still sells the service                                 */
     /* ------------------------------------------------------------------ */
 
-    public function test_each_service_shows_its_name_price_duration_and_a_book_action(): void
+    public function test_each_service_shows_its_name_price_and_a_book_action(): void
     {
         $service = $this->makeService([
             'name' => 'Gel Manicure',
@@ -640,8 +640,11 @@ class ServicesCategoryLayoutTest extends TestCase
 
         $this->assertStringContainsString('Gel Manicure', $html);
         $this->assertStringContainsString('₱350', $html);
-        $this->assertStringContainsString('1 hr', $html);
         $this->assertStringContainsString('Book Now', $html);
+
+        // The duration used to sit under the name here too ("1 hr"). The list is
+        // a price list, so the row is the name, the price and the action.
+        $this->assertStringNotContainsString('1 hr', $html, 'No duration on the price list.');
 
         // Book Now goes to the booking form with the service pre-selected, the
         // same target the old service card used.

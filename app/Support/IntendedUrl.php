@@ -96,4 +96,21 @@ class IntendedUrl
             ? $intended
             : $fallback;
     }
+
+    /**
+     * Throw a remembered destination away without reading it.
+     *
+     * For the guard whose login no longer honours one. The key is still
+     * cleared, deliberately: leaving it in the session would keep a stale URL
+     * sitting there for the rest of the visit, and would mean the behaviour came
+     * back the moment anything started reading this key again.
+     *
+     * @see \App\Http\Controllers\Auth\AuthenticatedSessionController for why the
+     *       customer login lands on the home page rather than where the guest was
+     *       going.
+     */
+    public static function forget(Request $request, string $scope): void
+    {
+        $request->session()->forget(static::SESSION_KEY.$scope);
+    }
 }

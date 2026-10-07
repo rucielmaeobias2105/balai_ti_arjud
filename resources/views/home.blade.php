@@ -39,12 +39,11 @@
 
             <h1 class="home-hero-title">Balai ti Arjud</h1>
 
-            <p class="home-script">Glow &amp; Co. Beauty Lounge</p>
+            <p class="home-script">Glow & Co. Beauty Lounge</p>
 
             <p class="home-description">
                 Where beauty meets hospitality. Book your services online and let our therapists
-                pamper you — from glow manicures and lash extensions to relaxing massage and spa
-                packages in the heart of Abra.
+                pamper you.
             </p>
 
             <div class="home-hero-buttons">
@@ -101,8 +100,12 @@
 
                 {{-- The same `.home-promo-*` card the Promo page uses, so a promo
                      looks identical wherever it appears. Stacked rather than a
-                     grid: the card is half picture by design, and three of them
-                     side by side would each be too narrow to read. --}}
+                     grid: the card is two-thirds text by design, and three of
+                     them side by side would each be too narrow to read.
+
+                     The card sizes to its own copy — the picture column is fixed
+                     and the text column grows — so a short offer here is short
+                     and a long one is given the room it needs. --}}
                 <div class="home-promo-grid">
                     @foreach ($promos as $offer)
                         <article class="home-promo-card">
@@ -145,9 +148,7 @@
             <div class="home-head">
                 <p class="home-eyebrow">MOST BOOKED</p>
                 <h2 class="home-title" id="home-most-booked-heading">Services our clients love</h2>
-                <p class="home-sub">
-                    The treatments that come back to the chair most often.
-                </p>
+
             </div>
 
             <div class="home-service-grid">

@@ -122,7 +122,7 @@
                             <th>Reference</th>
                             <th>Customer</th>
                             <th>Service(s)</th>
-                            <th>Date &amp; Time</th>
+                            <th>Date & Time</th>
                             <th>Status</th>
                             <th>Technician</th>
                             <th>Archived</th>

@@ -210,9 +210,9 @@ class AdminLayoutTest extends TestCase
      * The trimmed Appointments and Catalogue pages stay trimmed, and the shared
      * admin footer is gone.
      *
-     * The Calendar page is not asserted here at all — it no longer exists, and
-     * `CalendarRemovalTest` covers that. What replaced its assertions below is the
-     * one thing worth keeping in this file: the Appointments list is still trimmed.
+     * The Calendar page is not asserted here — it exists again, with its own month
+     * grid and header, and `BlockedSlotsTest` covers it. What is worth keeping in
+     * this file is the one thing below: the Appointments list is still trimmed.
      */
     public function test_the_removed_page_headers_cards_and_footer_stay_removed(): void
     {

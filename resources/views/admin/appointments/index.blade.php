@@ -13,6 +13,26 @@
          filter on this list: an archived booking is out of the working list
          whatever is searched for, so offering it here would suggest it is still
          in it. --}}
+    {{-- `appointmentRows` owns this page's live state: it polls for the rows'
+         current status and receives the tab counts back from a row's own save.
+         It is mounted here, above the tabs, because the tabs are the other thing
+         it updates — they count the same bookings the table shows, so a change
+         made without a page load has to move them too.
+
+         The ids the poller asks about come from the table below rather than from
+         this component's configuration, so the two cannot drift apart. --}}
+    <div
+        x-data="appointmentRows({
+            endpoint: @js(route('admin.appointments.row-state')),
+            {{-- Named `statusCounts` rather than `counts`: these are per-status
+                 totals for the tabs, and the layout's polling component carries
+                 a `pending` key meaning something else entirely — unseen
+                 bookings. Two payloads on one page that both call a number
+                 `pending` is how a badge ends up counting the wrong thing. --}}
+            statusCounts: @js($counts),
+        })"
+        x-on:admin-appointment-counts.window="statusCounts = $event.detail"
+    >
     <div class="mb-5 flex flex-wrap items-center justify-between gap-2">
         <div class="flex flex-wrap gap-2">
             <a href="{{ route('admin.appointments.index') }}"
@@ -23,9 +43,17 @@
                 <a href="{{ route('admin.appointments.index', ['status' => $value]) }}"
                    class="rounded-pill px-3.5 py-1.5 text-sm font-medium transition {{ ($filters['status'] ?? '') === $value ? 'bg-primary text-cream' : 'bg-cream text-ink hover:bg-linen' }}">
                     {{ $label }}
-                    @if (($counts[$value] ?? 0) > 0)
-                        <span class="ml-1 opacity-70">{{ $counts[$value] }}</span>
-                    @endif
+                    {{-- Rendered unconditionally so the pill can gain a number
+                         without a page load, and hidden with an inline style when
+                         there is nothing to count. The style is what governs
+                         without JavaScript; `x-show` takes over the moment
+                         Alpine runs, because Alpine writes `display` itself. --}}
+                    <span
+                        class="ml-1 opacity-70"
+                        style="{{ ($counts[$value] ?? 0) > 0 ? null : 'display: none' }}"
+                        x-show="(statusCounts['{{ $value }}'] ?? 0) > 0"
+                        x-text="statusCounts['{{ $value }}'] ?? 0"
+                    >{{ $counts[$value] ?? 0 }}</span>
                 </a>
             @endforeach
         </div>
@@ -61,7 +89,27 @@
                         @foreach ($appointments as $appointment)
                             @php $choices = $statusChoices[$appointment->id]; @endphp
 
-                            <tr>
+                            {{-- The Alpine scope is the row, not the status cell: the
+                                 dropdown and the row actions are two readings of the
+                                 same status, and they have to change together. The
+                                 `data-appointment-row` attribute is how the page's
+                                 poller finds this row without a second copy of the
+                                 list's query. --}}
+                            <tr
+                                data-appointment-row="{{ $appointment->id }}"
+                                x-data="appointmentStatus({
+                                    id: @js($appointment->id),
+                                    endpoint: @js(route('admin.appointments.status', $appointment)),
+                                    current: @js($appointment->status->value),
+                                    label: @js($appointment->status->label()),
+                                    badge: @js($appointment->status->badge()),
+                                    locked: @js($appointment->status->isLocked()),
+                                    choices: @js($choices),
+                                    canArchive: @js($appointment->canBeArchivedByAdmin()),
+                                    canDelete: @js($appointment->canBeDeletedByAdmin()),
+                                })"
+                                x-on:admin-appointment-row.window="if ($event.detail.id === id) apply($event.detail)"
+                            >
                                 <td>
                                     <p class="whitespace-nowrap font-medium text-ink">{{ $appointment->customer_name }}</p>
                                     <p class="whitespace-nowrap text-xs text-ink-muted">{{ $appointment->customer_phone }}</p>
@@ -83,18 +131,13 @@
                                              intercepts the change event only to
                                              report a refused transition in
                                              place. --}}
-                                        <div
-                                            x-data="appointmentStatus({
-                                                endpoint: @js(route('admin.appointments.status', $appointment)),
-                                                current: @js($appointment->status->value),
-                                            })"
-                                        >
-                                            <form method="POST" action="{{ route('admin.appointments.status', $appointment) }}">
+                                        <form method="POST" action="{{ route('admin.appointments.status', $appointment) }}">
                                                 @csrf
                                                 @method('PATCH')
 
                                                 <select
                                                     name="status"
+                                                    x-ref="select"
                                                     @class([
                                                         'status-select',
                                                         'status-select-'.$appointment->status->badge(),
@@ -120,33 +163,34 @@
                                                      it the change event has already fired. --}}
                                                 <button type="submit" class="sr-only">Save status</button>
                                             </form>
-
-                                            {{-- Why the control is dead, since a greyed-out
-                                                 dropdown on its own reads as a bug. Only
-                                                 for a locked status, and only visible
-                                                 when it would otherwise be unexplained. --}}
-                                            @if ($appointment->status->isLocked())
-                                                <p class="mt-1 max-w-[10rem] text-[11px] leading-snug text-ink-muted">
-                                                    A completed service is final and cannot be changed.
-                                                </p>
-                                            @endif
-                                        </div>
                                     @else
                                         <x-ui.badge :status="$appointment->status->badge()" :label="$appointment->status->label()" />
                                     @endcan
                                 </td>
                                 <td class="whitespace-nowrap text-right font-medium text-primary">₱{{ number_format((float) $appointment->total_amount, 2) }}</td>
                                 <td>
-                                    {{-- Three row actions, and the first two are only
-                                         rendered when the booking's status allows
+                                    {{-- Three row actions. The first is always there; Archive and
+                                         Delete are rendered for every row and revealed
+                                         by `x-show` when the booking's status permits
                                          them — `canBeArchivedByAdmin()` and
-                                         `canBeDeletedByAdmin()`, which are the same
-                                         settled-status rule the routes re-check.
+                                         `canBeDeletedByAdmin()`, the same settled-status
+                                         rule the routes re-check.
 
-                                         An in-progress booking therefore shows View
-                                         and nothing else, which is the honest
-                                         presentation: there is no way to remove a
-                                         booking that is happening right now. --}}
+                                         They used to be behind an `@if`, which meant
+                                         they did not exist in the page at all until a
+                                         reload built it again. That is why completing
+                                         a booking left the row looking identical until
+                                         the admin refreshed it: the two buttons are
+                                         rendered from the status, so they can only be
+                                         in a response built after the status changed.
+                                         The row's scope now carries the two flags and
+                                         the save repaints them, and the page's poller
+                                         does the same for a change made elsewhere.
+
+                                         Nothing is given up without JavaScript. Both
+                                         buttons only ever opened a dialog built by
+                                         Alpine, so before this they were visible but
+                                         inert; now they are inert and hidden. --}}
                                     <div class="flex items-center justify-end gap-1.5">
                                         <x-ui.icon-action
                                             label="View {{ $appointment->customer_name }}'s booking on {{ $appointment->preferred_date->format('M j, Y') }}"
@@ -156,35 +200,35 @@
                                             x-on:click.prevent="$dispatch('view-appointment', {{ $appointment->id }})"
                                         />
 
-                                        @if ($appointment->canBeArchivedByAdmin())
-                                            {{-- A button that opens the confirmation dialog rather than a
-                                                 form of its own: the one real form lives in the dialog
-                                                 below, so this costs no CSRF token and no `_method`
-                                                 spoof per row. The id rides along as the dialog's
-                                                 action, which is how the shared component knows which
-                                                 row it is confirming. --}}
-                                            <x-ui.icon-action
-                                                label="Archive this booking"
-                                                icon="heroicon-o-archive-box"
-                                                tone="secondary"
-                                                href="#"
-                                                x-on:click.prevent="$dispatch('confirm-archive', {
-                                                    id: {{ $appointment->id }},
-                                                })"
-                                            />
-                                        @endif
+                                        {{-- Buttons that open the confirmation dialog rather than a
+                                             form of their own: the one real form lives in the dialog
+                                             below, so this costs no CSRF token and no `_method`
+                                             spoof per row. The id rides along as the dialog's
+                                             action, which is how the shared component knows which
+                                             row it is confirming. --}}
+                                        <x-ui.icon-action
+                                            label="Archive this booking"
+                                            icon="heroicon-o-archive-box"
+                                            tone="secondary"
+                                            href="#"
+                                            x-show="canArchive"
+                                            x-cloak
+                                            x-on:click.prevent="$dispatch('confirm-archive', {
+                                                id: {{ $appointment->id }},
+                                            })"
+                                        />
 
-                                        @if ($appointment->canBeDeletedByAdmin())
-                                            <x-ui.icon-action
-                                                label="Delete this booking permanently"
-                                                icon="heroicon-o-trash"
-                                                tone="danger"
-                                                href="#"
-                                                x-on:click.prevent="$dispatch('confirm-delete-booking', {
-                                                    id: {{ $appointment->id }},
-                                                })"
-                                            />
-                                        @endif
+                                        <x-ui.icon-action
+                                            label="Delete this booking permanently"
+                                            icon="heroicon-o-trash"
+                                            tone="danger"
+                                            href="#"
+                                            x-show="canDelete"
+                                            x-cloak
+                                            x-on:click.prevent="$dispatch('confirm-delete-booking', {
+                                                id: {{ $appointment->id }},
+                                            })"
+                                        />
                                     </div>
                                 </td>
                             </tr>
@@ -196,6 +240,7 @@
 
         <div class="mt-6">{{ $appointments->links() }}</div>
     @endif
+    </div>
 @endsection
 
 @push('modals')

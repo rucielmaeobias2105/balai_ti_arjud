@@ -59,12 +59,18 @@
                                     <button type="submit" class="btn-primary btn-sm mb-1">Save</button>
                                 </form>
 
-                                <form method="POST" action="{{ route('admin.variants.destroy', $variant) }}" class="mt-2.5 flex justify-end"
-                                      onsubmit="return confirm('Remove the “{{ $variant->name }}” variant?')">
-                                    @csrf
-                                    @method('DELETE')
-                                    <button type="submit" class="toggle-link text-status-cancelled">Remove variant</button>
-                                </form>
+{{-- One dialog for the whole page, so a row carries no form and no
+                                     native prompt. `name` is what makes the
+                                     sentence read "Remove Long Hair?" rather than
+                                     "Remove 1 variant?", which is the part that
+                                     stops the wrong row being removed. --}}
+                                <div class="mt-2.5 flex justify-end">
+                                    <button
+                                        type="button"
+                                        class="toggle-link text-status-cancelled"
+                                        x-on:click="$dispatch('confirm-remove-variant', { name: @js($variant->name), action: @js(route('admin.variants.destroy', $variant)) })"
+                                    >Remove variant</button>
+                                </div>
                             </li>
                         @endforeach
                     </ul>
@@ -85,7 +91,17 @@
 
                     <button type="submit" class="btn-primary w-full">Add Variant</button>
                 </form>
-            </x-ui.card>
-        </aside>
+</x-ui.card>
+            </aside>
     </div>
+
+    {{-- Replaces the per-variant `onsubmit="return confirm(…)"`. --}}
+    <x-ui.confirm-dialog
+        title="Remove this variant?"
+        event="confirm-remove-variant"
+        verb="Remove"
+        subject="variant"
+        confirm-label="Yes, remove it"
+        cancel-label="Cancel"
+    />
 @endsection

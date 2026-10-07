@@ -43,14 +43,21 @@
     <div class="min-w-0 flex-1">
         <p class="text-sm font-medium text-primary">{{ $service->name }}</p>
 
-        <p class="text-xs text-ink-muted">
-            @if ($service->duration_minutes)
-                <span>{{ $service->duration_label }}</span>
-            @endif
-            @if ($service->isUnavailable())
-                <x-ui.badge status="sold_out" label="Sold Out" class="ml-1" />
-            @endif
-        </p>
+        {{-- The duration line ("1 hr", "1 hr 15 min", "30 min") is gone: this
+             list is a price list, and the only two facts a row carried beyond
+             the name were how long it takes and what it costs. Only the price
+             stays, so the secondary line now exists solely for the Sold Out
+             badge and is emitted only when there is one — an always-present
+             `<p>` holding nothing renders an empty band under the name.
+
+             `duration_minutes` itself is untouched: it is what the slot
+             generator and the availability rules read, so removing the label
+             hides a fact from the list without changing any booking. --}}
+        @if ($service->isUnavailable())
+            <p class="mt-0.5">
+                <x-ui.badge status="sold_out" label="Sold Out" />
+            </p>
+        @endif
     </div>
 
     <div class="flex shrink-0 items-center gap-2">

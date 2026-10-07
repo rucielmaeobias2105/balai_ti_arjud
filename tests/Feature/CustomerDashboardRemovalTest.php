@@ -58,6 +58,16 @@ class CustomerDashboardRemovalTest extends TestCase
         $this->get(route('home'))->assertOk();
     }
 
+    /**
+     * Registering lands on the home page, and actually registers.
+     *
+     * This used to post no `terms` and no password that satisfied the password
+     * rules, and still passed: a rejected POST redirects too, and `back()` with
+     * no referer falls back to `/` — which is the home page. So it asserted its
+     * own subject without ever creating an account. `terms` and a real password
+     * are supplied here, and the assertions prove the redirect came from a
+     * registration rather than from a refusal.
+     */
     public function test_registering_lands_on_the_home_page(): void
     {
         $this->post(route('register'), [
@@ -66,9 +76,15 @@ class CustomerDashboardRemovalTest extends TestCase
             'email' => 'new.customer@example.test',
             'username' => 'newcustomer',
             'contact_number' => '09171234567',
-            'password' => 'password',
-            'password_confirmation' => 'password',
+            'password' => 'Password123!',
+            'password_confirmation' => 'Password123!',
+            'terms' => '1',
         ])->assertRedirect(route('home'));
+
+        $this->assertAuthenticated();
+        $this->assertDatabaseHas('users', ['email' => 'new.customer@example.test']);
+
+        $this->get(route('home'))->assertOk();
     }
 
     public function test_a_signed_in_customer_is_redirected_off_the_login_screen_to_home(): void

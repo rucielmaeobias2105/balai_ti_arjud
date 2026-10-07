@@ -20,6 +20,28 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Promo Announcement Budget (seconds)
+    |--------------------------------------------------------------------------
+    |
+    | How long a single promo announcement may spend sending email before it
+    | stops sending it and finishes the rest of the list in-app only.
+    |
+    | `MAIL_TIMEOUT` bounds one send; this bounds the whole run. Both exist
+    | because notifications are sent inside the request that triggered them,
+    | with no queue and no worker to fall back on — see
+    | `PromoController::announce()`, which is the only place this is read.
+    |
+    | The default leaves room for a couple of dozen healthy sends and, if the
+    | mail server is not answering, stops well inside a 30-second PHP
+    | execution limit rather than spending the whole list's worth of timeouts
+    | and returning a 502 to the admin.
+    |
+    */
+
+    'promo_announce_budget' => (int) env('MAIL_ANNOUNCE_BUDGET', 15),
+
+    /*
+    |--------------------------------------------------------------------------
     | Mailer Configurations
     |--------------------------------------------------------------------------
     |
@@ -66,7 +88,30 @@ return [
             'port' => env('MAIL_PORT', 2525),
             'username' => env('MAIL_USERNAME'),
             'password' => env('MAIL_PASSWORD'),
-            'timeout' => null,
+
+            /*
+             * Bounded on purpose, because notifications are sent inside the
+             * request that caused them.
+             *
+             * This was `null`, which means "whatever PHP's
+             * `default_socket_timeout` is" — 60 seconds on a stock build. On
+             * shared hosting that is not a slow email, it is a 502: the mail
+             * server accepts the TCP connection and then goes quiet (port 25 is
+             * commonly blocked or silently dropped), the request sits inside a
+             * PHP execution limit, and the visitor gets a gateway error for a
+             * booking that was written to the database correctly and is now
+             * waiting for mail that was never going to arrive.
+             *
+             * Ten seconds is long enough for a real handshake and an SMTP
+             * conversation with Gmail or any ordinary relay, and short enough
+             * that a dead one fails inside the hosting plan's request budget. It
+             * only changes how long a *failing* send takes — a working one is
+             * unaffected — and `SendsNotificationsQuietly` turns the failure into
+             * a log line rather than a 500 either way.
+             *
+             * Override with MAIL_TIMEOUT on a host that needs longer.
+             */
+            'timeout' => (int) env('MAIL_TIMEOUT', 10),
             'local_domain' => env('MAIL_EHLO_DOMAIN', parse_url(env('APP_URL', 'http://localhost'), PHP_URL_HOST)),
         ],
 

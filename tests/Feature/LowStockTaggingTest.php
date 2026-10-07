@@ -190,7 +190,7 @@ class LowStockTaggingTest extends TestCase
             'customer_phone' => '09171234567',
             'preferred_date' => $this->bookableDate(),
             'preferred_time' => '10:00',
-            // Step 5 asks a first-timer what they had done before.
+            // Step 4 asks a first-timer what they had done before.
             'last_services_availed_note' => 'Glow Manicure',
             'down_payment_reference' => 'GCASH1234567890',
             'agree_terms' => '1',
@@ -215,7 +215,7 @@ class LowStockTaggingTest extends TestCase
             'customer_phone' => '09171234567',
             'preferred_date' => $this->bookableDate(),
             'preferred_time' => '10:00',
-            // Step 5 asks a first-timer what they had done before.
+            // Step 4 asks a first-timer what they had done before.
             'last_services_availed_note' => 'Glow Manicure',
             'down_payment_reference' => 'GCASH1234567890',
             'agree_terms' => '1',

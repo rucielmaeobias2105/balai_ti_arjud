@@ -60,7 +60,11 @@ class SalonHoursDisplayTest extends TestCase
 
         $html = $this->get('/contact')->assertOk()->getContent();
 
-        $this->assertStringContainsString('Monday – Sunday', $html);
+        // Monday is shut every week, so the schedule opens on Tuesday. The card
+        // renders the first and last OPEN day, so its label follows the hours
+        // rather than staying "Monday - Sunday" over a Tuesday-to-Sunday week.
+        $this->assertStringContainsString('Tuesday – Sunday', $html);
+        $this->assertStringNotContainsString('Monday – Sunday', $html);
         $this->assertStringContainsString('09:00 AM – 05:00 PM', $html);
 
         // And none of the 24-hour form the page used to print.
@@ -112,6 +116,10 @@ class SalonHoursDisplayTest extends TestCase
             $this->assertMatchesRegularExpression('/^\d{2}:\d{2}$/', $pair[1], "{$day} end is not HH:MM.");
         }
 
-        $this->assertSame(['09:00', '17:00'], $stored['monday']);
+        // Checked against a day the salon is actually open. Monday is no longer
+        // stored at all, so asserting its window here would read an undefined
+        // index rather than test anything about 24-hour storage.
+        $this->assertSame(['09:00', '17:00'], $stored['tuesday']);
+        $this->assertArrayNotHasKey('monday', $stored);
     }
 }

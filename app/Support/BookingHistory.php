@@ -9,7 +9,7 @@ use Illuminate\Support\Collection;
 /**
  * Whether this customer has been here before, and what they had done.
  *
- * Step 5 of the booking form branches on this — a first-timer is asked what they
+ * Step 4 of the booking form branches on this — a first-timer is asked what they
  * had done elsewhere, a returning customer is shown their own record instead —
  * and `StoreBookingRequest` branches on the same thing to decide whether that
  * answer is required.
@@ -29,7 +29,7 @@ use Illuminate\Support\Collection;
  */
 final class BookingHistory
 {
-    /** How many past services step 5 shows before it stops listing. */
+    /** How many past services step 4 shows before it stops listing. */
     public const DISPLAY_LIMIT = 5;
 
     /**
@@ -74,7 +74,7 @@ final class BookingHistory
     }
 
     /**
-     * What they last had here, newest first, for the read-only history in step 5.
+     * What they last had here, newest first, for the read-only history in step 4.
      *
      * Distinct names, and in the order they were most recently had rather than
      * alphabetically — the field is asking "what did you last have", so the
