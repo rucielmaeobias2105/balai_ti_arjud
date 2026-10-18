@@ -3,7 +3,7 @@
 **Balai ti Arjud — Glow & Co. Beauty Lounge** is a salon management web application built on
 Laravel 11. It serves two audiences from one codebase: **customers**, who browse the service
 catalogue and book, reschedule or cancel appointments at a beauty lounge, and the **salon's
-staff**, who run the business from a separate admin portal — working the appointment queue,
+staff**, who run the business from a separate admin portal working the appointment queue,
 maintaining the service catalogue, technicians and stock, publishing terms, promos and
 reports.
 
