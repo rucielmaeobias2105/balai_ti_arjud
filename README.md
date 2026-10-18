@@ -15,8 +15,8 @@ system, and an end-to-end feature test suite covering both sides of the app.
 
 ## Demo credentials
 
-Seeded by `AdminSeeder` and `UserSeeder`. These are development credentials — change or remove
-them before deploying anywhere public.
+Seeded by `AdminSeeder`. These are development credentials — change or remove them before
+deploying anywhere public.
 
 ### Staff / admin — `/admin/login`
 
@@ -28,20 +28,6 @@ them before deploying anywhere public.
 
 There is one admin account and no tiers. The seeder force-deletes any other admin row so a
 re-seed cannot quietly re-introduce them.
-
-### Customer
-
-| Field | Value |
-| --- | --- |
-| Email | `rucielmaeobias277@gmail.com` |
-| Username | `rucielmaeobias277` |
-| Password | `Rucielmae@21` |
-
-Customers sign in with either their email address or their username. Re-running the seeder
-resets this password, which is the point of a seeder but worth knowing.
-
-> **Note:** the launcher scripts (`start-dev.bat`, `dev-up.bat`) still print an older demo
-> customer address that `UserSeeder` no longer creates. Use the credentials above.
 
 ### Guards are isolated
 
