@@ -9,11 +9,12 @@ use Illuminate\Support\Facades\DB;
 /**
  * Empties the stockroom without touching anything else.
  *
- * The inventory seeder is gone, but a database that was seeded before it was
- * removed still holds those demo rows, and the low-stock badge on the sidebar
- * counts them. This is the one-off cleanup for that: it removes the items and
- * the service↔item links, and deliberately nothing else — services, customers,
- * appointments and every other table are left exactly as they are.
+ * The inventory seeder is run on demand rather than as part of the default seed
+ * run, but a database that has had it run still holds those rows, and the
+ * low-stock badge on the sidebar counts them. This is the one-off cleanup for
+ * that: it removes the items and the service↔item links, and deliberately
+ * nothing else — services, customers, appointments and every other table are
+ * left exactly as they are.
  *
  * Guarded behind --force, because deleting stock records is not something to
  * do by accident.

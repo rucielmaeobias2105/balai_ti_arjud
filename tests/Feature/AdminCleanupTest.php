@@ -218,16 +218,11 @@ class AdminCleanupTest extends TestCase
     /* Inventory seeding                                                  */
     /* ------------------------------------------------------------------ */
 
-    /**
-     * `db:seed` must not put demo stock back. The salon adds its own items from
-     * the Inventory screen, and seeded rows sit at the top of every low-stock
-     * count while misrepresenting what is actually in the stockroom.
-     */
-    public function test_seeding_does_not_create_inventory_items(): void
+    public function test_seeding_creates_the_salon_inventory(): void
     {
         $this->seed(\Database\Seeders\DatabaseSeeder::class);
 
-        $this->assertSame(0, \App\Models\InventoryItem::count());
+        $this->assertSame(85, InventoryItem::count());
     }
 
     public function test_inventory_clear_removes_items_and_leaves_everything_else(): void
@@ -276,16 +271,17 @@ class AdminCleanupTest extends TestCase
         $this->assertSame(0, \App\Models\InventoryItem::count());
     }
 
-    /**
-     * The seeder file itself is gone, so it cannot be re-run by accident.
-     */
-    public function test_there_is_no_inventory_seeder_any_more(): void
+    public function test_inventory_seeder_adds_the_salon_products_without_duplicates(): void
     {
-        $this->assertFileDoesNotExist(database_path('seeders/InventorySeeder.php'));
+        $this->seed(\Database\Seeders\InventorySeeder::class);
 
-        $contents = file_get_contents(database_path('seeders/DatabaseSeeder.php'));
-        $this->assertIsString($contents);
-        $this->assertStringNotContainsString('InventorySeeder', $contents);
+        $this->assertSame(85, InventoryItem::count());
+        $this->assertTrue(InventoryItem::where('name', 'Acetone / Nail Polish Remover')->exists());
+        $this->assertTrue(InventoryItem::where('name', 'Sterilization Pouches')->exists());
+
+        $this->seed(\Database\Seeders\InventorySeeder::class);
+
+        $this->assertSame(85, InventoryItem::count());
     }
 
     /* ------------------------------------------------------------------ */
