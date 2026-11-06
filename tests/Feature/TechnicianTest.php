@@ -266,7 +266,7 @@ class TechnicianTest extends TestCase
         $user = $this->makeUser();
 
         $html = $this->actingAs($user)
-            ->get('/book')
+            ->get($this->bookingUrl())
             ->assertOk()
             ->getContent();
 
@@ -308,7 +308,7 @@ class TechnicianTest extends TestCase
         $this->makeService();
         $user = $this->makeUser();
 
-        $html = $this->actingAs($user)->get('/book')->assertOk()->getContent();
+        $html = $this->actingAs($user)->get($this->bookingUrl())->assertOk()->getContent();
 
         $this->assertStringContainsString('name="technician_id" value=""', $html);
         $this->assertStringContainsString('No technicians have been set up yet', $html);
@@ -496,13 +496,13 @@ class TechnicianTest extends TestCase
         $this->makeService();
         $user = $this->makeUser();
 
-        $this->actingAs($user)->get('/admin/technicians')->assertRedirect(route('admin.login'));
-        $this->actingAs($user)->post('/admin/technicians', ['name' => 'Sneaky'])->assertRedirect(route('admin.login'));
+        $this->actingAs($user)->get('/admin/technicians')->assertRedirect(route('login'));
+        $this->actingAs($user)->post('/admin/technicians', ['name' => 'Sneaky'])->assertRedirect(route('login'));
     }
 
     public function test_a_guest_never_sees_the_technician_panel(): void
     {
-        $this->get('/admin/technicians')->assertRedirect(route('admin.login'));
+        $this->get('/admin/technicians')->assertRedirect(route('login'));
     }
 
     /**

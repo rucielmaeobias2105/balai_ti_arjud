@@ -47,10 +47,14 @@ class SalonConfigurationTest extends TestCase
 
         // Not "today" and not "tomorrow": the salon is shut every Monday, so both
         // of those depend on which day the suite happens to run and this test
-        // would fail one day in seven. `bookableDate()` asks the settings which
-        // days are actually open, which is the claim being made here anyway.
-        $this->assertTrue($settings->isOpenOn($this->bookableDate()));
-        $this->assertNotSame([], $settings->slotsFor($this->bookableDate()));
+        // would fail one day in seven. A named open weekday is stable, and unlike
+        // `bookableDate()` it does not call `makeSalonSettings()`, which rewrites
+        // the operating hours and would make the default assertions below test the
+        // fixture rather than the shipped default.
+        $openDate = $this->nextWeekday('tuesday');
+
+        $this->assertTrue($settings->isOpenOn($openDate));
+        $this->assertNotSame([], $settings->slotsFor($openDate));
 
         // And the standing weekly closure is in the default itself, not left to be
         // blocked by hand: no Monday, so no slot on a Monday.

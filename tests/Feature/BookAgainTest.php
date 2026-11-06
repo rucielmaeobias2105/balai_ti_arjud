@@ -328,23 +328,22 @@ class BookAgainTest extends TestCase
             ->assertForbidden();
     }
 
-    public function test_a_foreign_id_in_the_query_string_just_opens_an_empty_form(): void
+    public function test_a_foreign_id_in_the_query_string_sends_the_customer_to_the_services(): void
     {
         // `bookAgain()` is the guarded way in. A hand-typed `?from=` should not be
         // an error page about a booking the customer was never shown — that would
-        // confirm it exists — so the parameter is dropped and the ordinary empty
-        // form renders.
+        // confirm it exists — so the parameter is dropped. With no services to
+        // pre-select, the wizard sends them back to the catalogue rather than
+        // rendering a booking form that has nothing to book.
         $user = $this->makeUser();
         $theirs = $this->makeUser();
 
         $appointment = $this->completedAppointment($theirs, [$this->makeService()->id => ['quantity' => 1]]);
 
-        $html = $this->actingAs($user)
+        $this->actingAs($user)
             ->get(route('appointments.create', ['from' => $appointment->id]))
-            ->assertOk()
-            ->getContent();
-
-        $this->assertStringNotContainsString('"initial":[{"service_id"', $html);
+            ->assertRedirect(route('services.index').'#services')
+            ->assertSessionHas('toast');
     }
 
     public function test_a_service_that_has_been_retired_does_not_break_the_pre_fill(): void

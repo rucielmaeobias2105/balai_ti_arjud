@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\AppointmentStatus;
 use App\Models\SalonSetting;
+use App\Models\Service;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Notification;
@@ -32,8 +33,10 @@ class CustomerBookingPageCopyTest extends TestCase
 
     private function html(): string
     {
+        $service = $this->makeService();
+
         return $this->actingAs($this->makeUser())
-            ->get(route('appointments.create'))
+            ->get(route('appointments.create', ['services' => [$service->slug]]))
             ->assertOk()
             ->getContent();
     }
@@ -61,22 +64,23 @@ class CustomerBookingPageCopyTest extends TestCase
         $this->assertStringNotContainsString('Helps your therapist prepare ahead of time.', $html);
 
         // The cards themselves are untouched — only their subtitles went. The
-        // sequence runs 1…4: there is no down payment step, and steps 2+3 and
-        // steps 5+6 were each merged into one card, and Terms is no longer a card.
+        // sequence runs 1…3: the service picker is no longer a card, and steps
+        // 2+3 and 5+6 were merged, while Terms is no longer a card either.
         foreach ([
-            '1. Selected Service',
-            '2. Your Details &amp; Preferred Date &amp; Time',
-            '3. Preferences &amp; Health Notes',
-            '4. Last Service(s) Availed, Technician &amp; Special Request',
+            '1. Your Details &amp; Preferred Date &amp; Time',
+            '2. Preferences &amp; Health Notes',
+            '3. Last Service(s) Availed, Technician &amp; Special Request',
         ] as $title) {
             $this->assertStringContainsString($title, $html);
         }
 
-        // No heading from the pre-merge numbering survives, and no step 8 was
+        // No heading from the retired numbering survives, and no step 8 was
         // left behind by the earlier down-payment renumber.
         foreach ([
+            '1. Selected Service',
             '2. Your Details<',
             '3. Preferred Date &amp; Time',
+            '4. Last Service(s) Availed<',
             '5. Last Service(s) Availed<',
             '6. Choose Technician &amp; Special Request',
             '7. Terms &amp; Conditions',
@@ -351,8 +355,10 @@ class CustomerBookingPageCopyTest extends TestCase
             'name' => 'Gloss Manicure',
         ]), ['status' => AppointmentStatus::Completed]);
 
+        $booked = $this->makeService();
+
         $returning = $this->actingAs($user)
-            ->get(route('appointments.create'))
+            ->get(route('appointments.create', ['services' => [$booked->slug]]))
             ->assertOk()
             ->getContent();
 

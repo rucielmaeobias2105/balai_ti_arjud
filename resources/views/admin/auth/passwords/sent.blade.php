@@ -30,7 +30,7 @@
     </div>
 
     <div class="mt-8 flex flex-wrap justify-center gap-2">
-        <a href="{{ route('admin.login') }}" class="btn-primary">Back to Log In</a>
+        <a href="{{ route('login') }}" class="btn-primary">Back to Log In</a>
         <a href="{{ route('admin.password.request') }}" class="btn-ghost">Send it again</a>
     </div>
 @endsection

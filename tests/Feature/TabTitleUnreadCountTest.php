@@ -114,7 +114,7 @@ class TabTitleUnreadCountTest extends TestCase
     /* 2. The admin side                                                   */
     /* ------------------------------------------------------------------ */
 
-    public function test_the_admin_title_counts_pending_bookings_and_unread_enquiries(): void
+    public function test_the_admin_title_counts_unseen_bookings_but_not_unread_enquiries(): void
     {
         $admin = $this->makeAdmin();
 
@@ -129,7 +129,9 @@ class TabTitleUnreadCountTest extends TestCase
 
         $title = $this->title($this->actingAs($admin, 'admin')->get('/admin')->assertOk()->getContent());
 
-        $this->assertSame('(3) DASHBOARD | Balai ti Arjud Admin', $title);
+        // The enquiry is unread but has no Messages row or notification list to
+        // appear in, so it must not add a number the admin cannot account for.
+        $this->assertSame('(2) DASHBOARD | Balai ti Arjud Admin', $title);
     }
 
     public function test_a_quiet_admin_panel_gets_a_plain_title(): void
@@ -159,10 +161,11 @@ class TabTitleUnreadCountTest extends TestCase
         $html = $this->actingAs($admin, 'admin')->get('/admin')->assertOk()->getContent();
         $unescaped = $this->unescaped($html);
 
-        // One pending + one enquiry.
+        // One pending booking, one enquiry. The enquiry still reaches the poller
+        // for the Messages screen's own pill, but it does not feed the title.
         $this->assertStringContainsString('"pending":1', $unescaped);
         $this->assertStringContainsString('"unread":1', $unescaped);
-        $this->assertSame('(2) DASHBOARD | Balai ti Arjud Admin', $this->title($html));
+        $this->assertSame('(1) DASHBOARD | Balai ti Arjud Admin', $this->title($html));
     }
 
     /* ------------------------------------------------------------------ */
@@ -183,7 +186,8 @@ class TabTitleUnreadCountTest extends TestCase
         $user->notify(new WelcomeNotification());
 
         foreach (['/', '/appointments', '/services', '/book', '/profile', '/notifications'] as $path) {
-            $title = $this->title($this->actingAs($user)->get($path)->assertOk()->getContent());
+            $url = $path === '/book' ? $this->bookingUrl() : $path;
+            $title = $this->title($this->actingAs($user)->get($url)->assertOk()->getContent());
 
             $this->assertStringStartsWith(
                 '(1) ',

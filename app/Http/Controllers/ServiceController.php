@@ -135,6 +135,7 @@ class ServiceController extends Controller
     {
         return Service::query()
             ->active()
+            ->with('variants')
             ->search($request->input('search'))
             ->category($request->input('category'))
             // Filtered on base_price, not price: price is the advertised

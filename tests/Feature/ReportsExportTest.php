@@ -398,14 +398,14 @@ class ReportsExportTest extends TestCase
     {
         $user = $this->makeUser();
 
-        $this->actingAs($user)->get(route('admin.reports.export'))->assertRedirect(route('admin.login'));
-        $this->actingAs($user)->get(route('admin.inventory.export'))->assertRedirect(route('admin.login'));
+        $this->actingAs($user)->get(route('admin.reports.export'))->assertRedirect(route('login'));
+        $this->actingAs($user)->get(route('admin.inventory.export'))->assertRedirect(route('login'));
     }
 
     public function test_a_guest_cannot_reach_either_export(): void
     {
-        $this->get(route('admin.reports.export'))->assertRedirect(route('admin.login'));
-        $this->get(route('admin.inventory.export'))->assertRedirect(route('admin.login'));
+        $this->get(route('admin.reports.export'))->assertRedirect(route('login'));
+        $this->get(route('admin.inventory.export'))->assertRedirect(route('login'));
     }
 
     /** Revenue counts only what was actually earned — a cancelled booking is not income. */

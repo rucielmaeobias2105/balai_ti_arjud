@@ -42,19 +42,22 @@
                 else: the whole point of the layout is that a category and its
                 prices read together, and a link out would split the two.
             --}}
-            <div class="grid items-stretch gap-5 md:grid-cols-2 lg:gap-6">
+            <div class="grid scroll-mt-24 items-stretch gap-5 md:grid-cols-2 lg:gap-6" id="services">
                 @foreach ($categories as $row)
                     @php
                         $services = $row['services'];
                         $preview = $services->take(4);
                         $hidden = $services->count() - $preview->count();
+                        $bookableCount = $services->filter(function ($s) {
+                            $hasVariantPrice = $s->variants->contains(fn ($v) => $v->base_price !== null);
+
+                            return ! $s->isUnavailable() && ($s->base_price !== null || $hasVariantPrice);
+                        })->count();
                     @endphp
 
                     {{--
-                        The Alpine scope rides on the card only when there is
-                        something to expand. A category of four or fewer gets no
-                        `x-data`, so it has no disclosure state to be stale about
-                        and nothing to wire up.
+                        The Alpine scope rides on the card for disclosure (`serviceCategory()`)
+                        or multi-select (`categoryMultiSelect()`).
 
                         `sm:flex-row` is what turns the two columns into two
                         columns; below `sm` it is a single column and the photo
@@ -63,18 +66,35 @@
                     --}}
                     <section
                         class="bta-card flex overflow-hidden"
-                        @if ($hidden > 0) x-data="serviceCategory()" @endif
+                        @if ($hidden > 0) x-data="serviceCategory()" @else x-data="categoryMultiSelect()" @endif
                     >
                         <div class="flex w-full flex-col sm:flex-row">
                             {{-- Left column: what the category is, and what it costs. --}}
                             <div class="flex flex-1 flex-col p-4 sm:p-5">
-                                <div class="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
-                                    <h2 class="font-display text-lg font-bold tracking-tight text-primary">
-                                        {{ $row['category']->name }}
-                                    </h2>
-                                    <p class="text-xs text-ink-muted">
-                                        {{ $row['count'] }} {{ Str::plural('service', $row['count']) }}
-                                    </p>
+                                <div class="flex flex-wrap items-center justify-between gap-2">
+                                    <div class="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
+                                        <h2 class="font-display text-lg font-bold tracking-tight text-primary">
+                                            {{ $row['category']->name }}
+                                        </h2>
+                                        <p class="text-xs text-ink-muted">
+                                            {{ $row['count'] }} {{ Str::plural('service', $row['count']) }}
+                                        </p>
+                                    </div>
+
+                                    @if ($bookableCount > 0)
+                                        <label class="inline-flex cursor-pointer select-none items-center gap-1.5 text-xs font-medium text-ink-muted hover:text-primary">
+                                            <input
+                                                type="checkbox"
+                                                class="checkbox"
+                                                data-category-select-all
+                                                x-bind:checked="allSelected"
+                                                x-effect="$el.indeterminate = someSelected"
+                                                x-on:change="toggleAll($event.target.checked)"
+                                                aria-label="Select all available in {{ $row['category']->name }}"
+                                            >
+                                            <span>Select All</span>
+                                        </label>
+                                    @endif
                                 </div>
 
                                 <ul class="mt-3 divide-y divide-primary/8">
@@ -136,6 +156,43 @@
                                         </button>
                                     </div>
                                 @endif
+
+                                {{-- Multi-select checkout action bar: sends the selected services in this
+                                     category to /book in one step. One service is booked from its own row's
+                                     Book Now button, so this action only unlocks at two or more. The literal
+                                     `disabled` is the no-JavaScript fallback; Alpine maintains the live state. --}}
+                                <div
+                                    class="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/15 bg-linen/60 px-3 py-2.5"
+                                    x-bind:class="selected.length <= 1 ? 'opacity-60' : ''"
+                                >
+                                    <div class="flex flex-wrap items-center gap-2">
+                                        <button
+                                            type="button"
+                                            class="btn-primary btn-sm"
+                                            data-proceed-selected
+                                            disabled
+                                            x-bind:disabled="selected.length <= 1"
+                                            x-on:click="proceedToBooking(@js(route('appointments.create')))"
+                                        >
+                                            <i class="fa-solid fa-cart-shopping" aria-hidden="true"></i>
+                                            Proceed to Checkout
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="btn-ghost btn-sm"
+                                            x-bind:disabled="selected.length === 0"
+                                            x-on:click="clearSelection()"
+                                        >
+                                            Clear
+                                        </button>
+                                    </div>
+                                    <p class="text-xs font-medium text-ink">
+                                        <span x-text="selected.length"></span> selected
+                                        <span x-show="selectedTotal > 0" x-cloak>
+                                            &middot; <span x-text="selectedTotalLabel"></span>
+                                        </span>
+                                    </p>
+                                </div>
                             </div>
 
                             {{-- Right column: the one picture that stands for this

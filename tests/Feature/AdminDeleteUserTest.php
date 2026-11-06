@@ -452,7 +452,7 @@ class AdminDeleteUserTest extends TestCase
 
         $this->actingAs($this->makeUser())
             ->delete(route('admin.users.destroy', $user))
-            ->assertRedirect(route('admin.login'));
+            ->assertRedirect(route('login'));
 
         $this->assertDatabaseHas('users', ['id' => $user->id, 'deleted_at' => null]);
         $this->assertNotSame('deleted-user-'.$user->id.'@anonymized.invalid', $user->fresh()->email);
@@ -463,7 +463,7 @@ class AdminDeleteUserTest extends TestCase
         $user = $this->makeUser();
 
         $this->delete(route('admin.users.destroy', $user))
-            ->assertRedirect(route('admin.login'));
+            ->assertRedirect(route('login'));
 
         $this->assertDatabaseHas('users', ['id' => $user->id, 'deleted_at' => null]);
     }

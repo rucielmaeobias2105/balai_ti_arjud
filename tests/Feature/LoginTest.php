@@ -126,7 +126,7 @@ class LoginTest extends TestCase
     {
         $user = $this->makeUser();
 
-        $this->actingAs($user)->post('/logout')->assertRedirect(route('home'));
+        $this->actingAs($user)->post('/logout')->assertRedirect(route('login'));
 
         $this->assertGuest();
     }
@@ -153,16 +153,23 @@ class LoginTest extends TestCase
     {
         $this->actingAs($this->makeUser());
 
-        $this->get('/admin')->assertRedirect(route('admin.login'));
-        $this->get('/admin/appointments')->assertRedirect(route('admin.login'));
+        $this->get('/admin')->assertRedirect(route('login'));
+        $this->get('/admin/appointments')->assertRedirect(route('login'));
+    }
+
+    public function test_the_old_admin_login_url_redirects_to_the_unified_login(): void
+    {
+        $this->get('/admin/login')->assertRedirect(route('login'));
+
+        $this->post('/admin/login')->assertRedirect(route('login'));
     }
 
     public function test_admin_login_uses_the_admin_guard(): void
     {
         $admin = $this->makeAdmin(['username' => 'admin', 'email' => 'admin@example.test']);
 
-        $this->post('/admin/login', [
-            'username' => 'admin',
+        $this->post('/login', [
+            'login' => 'admin',
             'password' => 'password',
         ])->assertRedirect(route('admin.dashboard'));
 
@@ -175,10 +182,38 @@ class LoginTest extends TestCase
     {
         $this->makeUser(['email' => 'juan@example.test', 'username' => 'juan']);
 
-        $this->post('/admin/login', [
+        $this->post(route('login.store'), [
             'username' => 'juan@example.test',
             'password' => 'password',
-        ])->assertSessionHasErrors('username');
+        ])->assertRedirect(route('home'));
+
+        $this->assertFalse(auth('admin')->check());
+        $this->assertTrue(auth('web')->check());
+    }
+
+    public function test_shared_login_never_leaks_role_on_invalid_credentials(): void
+    {
+        $this->makeAdmin(['username' => 'admin', 'email' => 'admin@example.test']);
+        $this->makeUser(['email' => 'juan@example.test', 'username' => 'juan']);
+
+        $this->post('/login', [
+            'login' => 'admin',
+            'password' => 'wrong-password',
+        ])->assertSessionHasErrors(['login' => 'Invalid credentials.']);
+
+        $this->post('/login', [
+            'login' => 'juan@example.test',
+            'password' => 'wrong-password',
+        ])->assertSessionHasErrors(['login' => 'Invalid credentials.']);
+    }
+
+    public function test_admin_logout_redirects_to_login(): void
+    {
+        $admin = $this->makeAdmin();
+
+        $this->actingAs($admin, 'admin')
+            ->post('/admin/logout')
+            ->assertRedirect(route('login'));
 
         $this->assertFalse(auth('admin')->check());
     }

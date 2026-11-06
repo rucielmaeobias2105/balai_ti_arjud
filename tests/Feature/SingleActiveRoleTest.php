@@ -44,7 +44,7 @@ class SingleActiveRoleTest extends TestCase
 
     private function loginAsAdmin($admin): void
     {
-        $this->post(route('admin.login.store'), [
+        $this->post(route('login.store'), [
             'username' => $admin->username,
             'password' => 'password',
         ])->assertRedirect();
@@ -121,7 +121,7 @@ class SingleActiveRoleTest extends TestCase
 
         $this->loginAsCustomer($user);
 
-        $this->get(route('admin.dashboard'))->assertRedirect(route('admin.login'));
+        $this->get(route('admin.dashboard'))->assertRedirect(route('login'));
     }
 
     /* ------------------------------------------------------------------ */
@@ -150,7 +150,7 @@ class SingleActiveRoleTest extends TestCase
         // A guest asking for the customer dashboard: remembered, then refused.
         $this->get(route('appointments.index'))->assertRedirect(route('login'));
 
-        $this->post(route('admin.login.store'), [
+        $this->post(route('login.store'), [
             'username' => $admin->username,
             'password' => 'password',
         ])->assertRedirect(route('admin.dashboard'));
@@ -161,7 +161,7 @@ class SingleActiveRoleTest extends TestCase
     {
         $user = $this->makeUser();
 
-        $this->get(route('admin.dashboard'))->assertRedirect(route('admin.login'));
+        $this->get(route('admin.dashboard'))->assertRedirect(route('login'));
 
         $this->post(route('login.store'), [
             'login' => $user->email,
@@ -170,19 +170,12 @@ class SingleActiveRoleTest extends TestCase
     }
 
     /**
-     * A customer sign-in always lands on the home page.
+     * A customer sign-in honours the customer guard's remembered destination.
      *
-     * This is the behaviour the customer login was changed to. It used to be
-     * `IntendedUrl::pull()`, which honoured the remembered destination — and
-     * because My Appointments is in the customer navigation and is guarded, the
-     * page that caused the bounce was most often My Appointments, so signing in
-     * appeared to drop everybody onto the appointments list.
-     *
-     * The scope still has to do its job, though: the admin guard keeps its own
-     * remembered destination (asserted below), so the two logins still cannot
-     * steal each other's.
+     * The destination is scoped, so the admin bounce in the test below cannot
+     * move it; and a plain visit to /login still falls back to the home page.
      */
-    public function test_a_customer_sign_in_lands_on_the_home_page_even_after_being_bounced(): void
+    public function test_a_customer_sign_in_is_returned_to_the_page_it_asked_for(): void
     {
         $user = $this->makeUser();
 
@@ -191,7 +184,7 @@ class SingleActiveRoleTest extends TestCase
         $this->post(route('login.store'), [
             'login' => $user->email,
             'password' => 'password',
-        ])->assertRedirect(route('home'));
+        ])->assertRedirect(route('appointments.index'));
     }
 
     /** …and the same bounce does not take the admin to the customer's pages. */
@@ -201,7 +194,7 @@ class SingleActiveRoleTest extends TestCase
 
         $this->get(route('appointments.index'))->assertRedirect(route('login'));
 
-        $this->post(route('admin.login.store'), [
+        $this->post(route('login.store'), [
             'username' => $admin->username,
             'password' => 'password',
         ])->assertRedirect(route('admin.dashboard'));
@@ -218,20 +211,20 @@ class SingleActiveRoleTest extends TestCase
     {
         $admin = $this->makeAdmin();
 
-        $this->get(route('admin.appointments.index'))->assertRedirect(route('admin.login'));
+        $this->get(route('admin.appointments.index'))->assertRedirect(route('login'));
 
-        $this->post(route('admin.login.store'), [
+        $this->post(route('login.store'), [
             'username' => $admin->username,
             'password' => 'password',
         ])->assertRedirect(route('admin.appointments.index'));
     }
 
     /**
-     * A customer bounce leaves nothing behind for the next sign-in.
+     * A customer bounce is read once and leaves nothing behind.
      *
      * The customer login clears the remembered key rather than leaving it to
      * expire, so a stale URL cannot sit in the session for the rest of the
-     * visit — and cannot come back if anything starts honouring it again.
+     * visit. A later, deliberately bare /login therefore falls back to home.
      */
     public function test_a_customer_bounce_leaves_nothing_behind_for_the_next_login(): void
     {
@@ -242,7 +235,7 @@ class SingleActiveRoleTest extends TestCase
         $this->post(route('login.store'), [
             'login' => $user->email,
             'password' => 'password',
-        ])->assertRedirect(route('home'));
+        ])->assertRedirect(route('appointments.index'));
 
         $this->assertNull(session(IntendedUrl::SESSION_KEY.'customer'));
 
@@ -268,12 +261,12 @@ class SingleActiveRoleTest extends TestCase
         $this->get(route('appointments.index'))->assertOk();
 
         // Tab B signs out, which leaves the browser a guest.
-        $this->post(route('logout'))->assertRedirect(route('home'));
+        $this->post(route('logout'))->assertRedirect(route('login'));
         $this->get(route('appointments.index'))->assertRedirect(route('login'));
 
         // Tab B signs in as an admin — and gets the panel, not the customer
         // dashboard that the guest above was bounced off.
-        $this->post(route('admin.login.store'), [
+        $this->post(route('login.store'), [
             'username' => $admin->username,
             'password' => 'password',
         ])->assertRedirect(route('admin.dashboard'));
@@ -322,14 +315,19 @@ class SingleActiveRoleTest extends TestCase
         $expected = [
             'bta-home-admin' => route('admin.dashboard'),
             'bta-home-web' => route('home'),
-            'bta-login-admin' => route('admin.login'),
+            'bta-login-admin' => route('login'),
             'bta-login-web' => route('login'),
             'bta-session-status' => route('session-status'),
         ];
 
-        foreach ([route('home'), route('admin.login'), route('login')] as $path) {
-            $html = $this->get($path)->assertOk()->getContent();
+        $pages = [
+            route('home') => $this->get(route('home'))->assertOk()->getContent(),
+            route('login') => $this->get(route('login'))->assertOk()->getContent(),
+            route('admin.dashboard') => $this->actingAs($this->makeAdmin(), 'admin')
+                ->get(route('admin.dashboard'))->assertOk()->getContent(),
+        ];
 
+        foreach ($pages as $path => $html) {
             foreach ($expected as $name => $value) {
                 $this->assertStringContainsString(
                     'name="'.$name.'" content="'.$value.'"',

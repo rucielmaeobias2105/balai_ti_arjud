@@ -87,7 +87,7 @@
 
     /** The login page to send a signed-out tab to, per guard. */
     const logins = {
-        admin: meta('bta-login-admin', '/admin/login'),
+        admin: meta('bta-login-admin', '/login'),
         web: meta('bta-login-web', '/login'),
     };
 
@@ -562,15 +562,19 @@ window.btaUnread = (function () {
  * A separate store rather than a shared one because the two are never both live —
  * a customer session and an admin session cannot occupy the same tab — and
  * because the two counts mean different things. The customer's is "unread
- * notifications"; this one is "things waiting on the salon", the sum of bookings
- * awaiting a decision and enquiries nobody has opened. Sharing one variable would
- * invite a customer number leaking into the admin tab title or the reverse, and
- * the failure would be silent.
+ * notifications"; this one is the badge on the admin's one badged work row:
+ * bookings the salon has not looked at yet.
  *
- * Same contract as the customer's, for the same reason: three things show this
- * number (the bell badge, the tab title's "(2)", and the sidebar's Appointments
- * count via the `admin-pending` event), and when they each kept their own copy
- * they disagreed with nothing on screen to say which was lying.
+ * It deliberately no longer includes unread contact enquiries. The Messages row
+ * is not in the admin nav, so those enquiries have no visible notification
+ * surface; counting them made the tab title show "(2)" with nothing on screen to
+ * explain or clear it. The Messages screen still keeps its own unread pill live
+ * through `admin-messages`; it just does not feed this title count.
+ *
+ * Same contract as the customer's, for the same reason: the tab title and the
+ * sidebar's Appointments count via the `admin-pending` event should agree, and
+ * when they each kept their own copy they disagreed with nothing on screen to say
+ * which was lying.
  */
 window.btaAdminUnread = (function () {
     let count = 0;
@@ -1762,13 +1766,94 @@ document.addEventListener('alpine:init', () => {
      * One instance per section, so expanding Nail Art & Pedicure leaves Brow &
      * Lash Extension exactly as the customer left it.
      */
-    Alpine.data('serviceCategory', () => ({
+    /**
+     * Category card disclosure + multi-select checkout on the Services page.
+     *
+     * Supports both:
+     *   - Expanding/collapsing categories with more than 4 services (`expanded`, `toggle()`)
+     *   - Selecting individual available services (`selected` array of slugs) or
+     *     "Select All" (`toggleAll`, `allSelected`, `someSelected`), skipping
+     *     services that are unavailable/sold out or non-bookable, and proceeding
+     *     to checkout/booking with all selected items in one step.
+     *
+     * Registered under both `serviceCategory` (for categories with > 4 items) and
+     * `categoryMultiSelect` (for categories with <= 4 items, which have no
+     * "See More" disclosure toggle).
+     */
+    const serviceCategoryCard = () => ({
         expanded: false,
+        selected: [],
+
+        init() {
+            // Returning here with the Back button can restore the previous
+            // Alpine state from the browser's back/forward cache. Clear it so a
+            // customer who has just completed an order can select items again.
+            window.addEventListener('pageshow', () => {
+                this.selected = [];
+            });
+        },
 
         toggle() {
             this.expanded = !this.expanded;
         },
-    }));
+
+        boxes() {
+            return Array.from(
+                this.$root.querySelectorAll('input[type="checkbox"][data-service-checkbox]:not(:disabled)'),
+            );
+        },
+
+        get total() {
+            return this.boxes().length;
+        },
+
+        get allSelected() {
+            return this.total > 0 && this.selected.length === this.total;
+        },
+
+        get someSelected() {
+            return this.selected.length > 0 && !this.allSelected;
+        },
+
+        get selectedTotal() {
+            return this.boxes()
+                .filter((box) => this.selected.includes(box.value))
+                .reduce((sum, box) => sum + Number(box.dataset.servicePrice || 0), 0);
+        },
+
+        get selectedTotalLabel() {
+            return new Intl.NumberFormat('en-PH', {
+                style: 'currency',
+                currency: 'PHP',
+                minimumFractionDigits: 2,
+            }).format(this.selectedTotal);
+        },
+
+        toggleAll(checked) {
+            this.selected = checked ? this.boxes().map((box) => box.value) : [];
+        },
+
+        clearSelection() {
+            this.selected = [];
+        },
+
+        proceedToBooking(baseUrl) {
+            if (!baseUrl || this.selected.length <= 1) return;
+
+            const url = new URL(baseUrl, window.location.origin);
+            this.selected.forEach((slug) => {
+                url.searchParams.append('services[]', slug);
+            });
+
+            // Reset selection state once items are dispatched to the order/booking.
+            this.selected = [];
+
+            window.location.assign(url.toString());
+        },
+    });
+
+    Alpine.data('serviceCategory', () => serviceCategoryCard());
+    Alpine.data('categoryMultiSelect', () => serviceCategoryCard());
 
     /**
      * The navbar notification bell: a live badge on a link to the notifications.
@@ -2095,10 +2180,10 @@ document.addEventListener('alpine:init', () => {
         onVisible: null,
 
         init() {
-            // Server truth first, so the title and the badges agree before the
-            // first poll rather than after it. Seeded from the two numbers the
-            // server rendered, because on this first render the store has never
-            // been told anything.
+            // Server truth first, so the title and the badge agree before the
+            // first poll rather than after it. Seeded from the number the server
+            // rendered, because on this first render the store has never been
+            // told anything.
             window.btaAdminUnread?.seed(this.total);
 
             if (!this.endpoint) return;
@@ -2122,16 +2207,16 @@ document.addEventListener('alpine:init', () => {
         },
 
         /**
-         * Bookings awaiting a decision plus enquiries nobody has opened.
+         * Bookings the salon has not looked at yet.
          *
-         * The number the tab title shows. Summed from the two halves rather than
-         * read back from the store, because this is the *server's* total — the
-         * store is what gets told, not what is asked. An optimistic read
-         * deliberately moves only the store, so reading the total out of it here
-         * would make the next poll "correct" an update that never happened.
+         * This is the number the tab title and the Appointments badge show.
+         * Enquiries deliberately do not contribute: the Messages row is not in
+         * the admin nav, so they have no visible notification surface and only
+         * produced a count nobody could account for. They still travel in
+         * `this.messages` for the Messages screen's own unread pill.
          */
         get total() {
-            return this.pending + this.messages;
+            return this.pending;
         },
 
         csrf() {
@@ -2184,12 +2269,11 @@ document.addEventListener('alpine:init', () => {
 
             this.reading[id] = true;
 
-            // Optimistic: the title's "(n)" and the Messages badge come off on
-            // the click. The server's number replaces it a moment later, and a
-            // failure puts it back — a count that quietly disagrees with the
-            // database is the one outcome the poller cannot repair, because it
-            // would have to be wrong at exactly the moment nobody was looking.
-            window.btaAdminUnread?.decrement(1);
+            // Optimistic: only the Messages screen's own unread pill comes off
+            // on the click. The tab title and Appointments badge count unseen
+            // bookings, so reading an enquiry must not move them. The server's
+            // numbers replace these a moment later, and a failure puts them
+            // back.
             this.dispatch('admin-messages', Math.max(0, this.messages - 1));
 
             try {

@@ -198,7 +198,7 @@ class AppointmentStatusUpdateTest extends TestCase
         $appointment = $this->makeAppointment($this->makeUser());
 
         $this->patch(route('admin.appointments.status', $appointment), ['status' => 'confirmed'])
-            ->assertRedirect(route('admin.login'));
+            ->assertRedirect(route('login'));
 
         $this->assertSame(AppointmentStatus::Pending, $appointment->fresh()->status);
     }
@@ -209,7 +209,7 @@ class AppointmentStatusUpdateTest extends TestCase
 
         $this->actingAs($appointment->user)
             ->patch(route('admin.appointments.status', $appointment), ['status' => 'confirmed'])
-            ->assertRedirect(route('admin.login'));
+            ->assertRedirect(route('login'));
 
         $this->assertSame(AppointmentStatus::Pending, $appointment->fresh()->status);
     }

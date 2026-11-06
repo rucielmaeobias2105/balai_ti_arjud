@@ -48,3 +48,9 @@ Schedule::command(ArchiveCompletedAppointmentsCommand::class)
     ->withoutOverlapping()
     ->onOneServer()
     ->description('Archive completed appointments older than '.AppointmentArchiver::DAYS_BEFORE_AUTO_ARCHIVE.' days.');
+
+Schedule::command('records:cleanup')
+    ->dailyAt('02:00')
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->description('Delete notifications and archive appointments and activity logs older than '.AppointmentArchiver::DAYS_BEFORE_AUTO_ARCHIVE.' days.');

@@ -49,7 +49,7 @@ class BookingCreationTest extends TestCase
         $this->makeSalonSettings();
         $this->makeService(['name' => 'Glow Manicure', 'slug' => 'glow-manicure']);
 
-        $this->get('/book')
+        $this->get($this->bookingUrl())
             ->assertOk()
             ->assertSee('Book Appointment')
             ->assertSee('Booking Summary')
@@ -126,7 +126,7 @@ class BookingCreationTest extends TestCase
 
         // Guests may browse the catalogue but every booking is tied to an
         // account, so the form and the POST are both behind auth.
-        $this->get('/book')->assertRedirect(route('login'));
+        $this->get($this->bookingUrl())->assertRedirect(route('login'));
 
         $this->post('/book', $this->payload())->assertRedirect(route('login'));
 

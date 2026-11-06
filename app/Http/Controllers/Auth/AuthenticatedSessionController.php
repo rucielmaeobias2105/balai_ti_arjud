@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
+use App\Models\Admin;
 use App\Models\User;
 use App\Support\IntendedUrl;
 use Illuminate\Http\RedirectResponse;
@@ -16,10 +17,16 @@ use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 /**
- * Customer Flow 2 — Login.
+ * Unified Login Entry Point (Customer & Admin).
  *
- * The field is labelled "Username or Email" per the mockup and matches either
- * column. Attempts are rate limited per identifier + IP.
+ * `/login` is the only login form and this is its only authentication handler.
+ * `/admin/login` is a legacy redirect to it. The role is decided only after
+ * credentials are verified:
+ *   - Admin account (`admins` table) -> `admin` guard -> `admin.dashboard`
+ *   - Customer account (`users` table) -> `web` guard -> `home`
+ *
+ * Invalid or inactive credentials return a single generic "Invalid credentials"
+ * error without leaking whether an account belongs to an admin or customer.
  */
 class AuthenticatedSessionController extends Controller
 {
@@ -37,26 +44,44 @@ class AuthenticatedSessionController extends Controller
         $this->ensureIsNotRateLimited($request);
 
         $login = $request->string('login')->toString();
+        $password = $request->string('password')->toString();
 
-        $user = User::query()
-            ->where('email', $login)
-            ->orWhere('username', $login)
+        $admin = Admin::query()
+            ->whereRaw('LOWER(username) = ?', [$login])
+            ->orWhereRaw('LOWER(email) = ?', [$login])
             ->first();
 
-        if (! $user || ! Hash::check($request->string('password')->toString(), $user->password)) {
-            RateLimiter::hit($this->throttleKey($request), self::DECAY_SECONDS);
+        if ($admin && Hash::check($password, $admin->password)) {
+            if (! $admin->is_active) {
+                RateLimiter::hit($this->throttleKey($request), self::DECAY_SECONDS);
 
-            throw ValidationException::withMessages([
-                'login' => 'These credentials do not match our records.',
-            ]);
+                throw ValidationException::withMessages($this->errorMessages($request, 'Invalid credentials.'));
+            }
+
+            RateLimiter::clear($this->throttleKey($request));
+
+            // Maintain session isolation: one active role per browser.
+            Auth::guard('web')->logout();
+
+            Auth::guard('admin')->login($admin, $request->boolean('remember'));
+            $request->session()->regenerate();
+
+            $admin->forceFill(['last_login_at' => now()])->saveQuietly();
+
+            IntendedUrl::forget($request, 'customer');
+
+            return redirect()->to(IntendedUrl::pull($request, 'admin', route('admin.dashboard')));
         }
 
-        if (! $user->is_active) {
+        $user = User::query()
+            ->whereRaw('LOWER(email) = ?', [$login])
+            ->orWhereRaw('LOWER(username) = ?', [$login])
+            ->first();
+
+        if (! $user || ! Hash::check($password, $user->password) || ! $user->is_active) {
             RateLimiter::hit($this->throttleKey($request), self::DECAY_SECONDS);
 
-            throw ValidationException::withMessages([
-                'login' => 'Your account has been deactivated. Please contact us.',
-            ]);
+            throw ValidationException::withMessages($this->errorMessages($request, 'Invalid credentials.'));
         }
 
         RateLimiter::clear($this->throttleKey($request));
@@ -77,61 +102,24 @@ class AuthenticatedSessionController extends Controller
 
         $user->forceFill(['last_login_at' => now()])->saveQuietly();
 
-        /*
-         * Always the home page, and the remembered destination is discarded.
-         *
-         * This used to be `IntendedUrl::pull($request, 'customer', route('home'))`,
-         * which sent a customer who had been bounced off a guarded page back to
-         * that page. In practice the page they were bounced off most often was
-         * My Appointments — it is in the customer navigation, so it is where
-         * people click, and it is guarded — so signing in appeared to dump
-         * everybody on the appointments list whether they wanted it or not.
-         *
-         * The home page is the only landing that is right for both cases: the
-         * customer who came to sign in, and the customer who was interrupted
-         * halfway to something. The cost is that a customer sent to the login
-         * screen by clicking "Book Appointment" now arrives at the home page
-         * rather than back at the booking form, and has to click through again.
-         * That is the trade this makes, deliberately, and it is why the
-         * remembered URL is cleared rather than left to expire.
-         *
-         * The admin login is untouched: staff signing in after being bounced off
-         * a panel page still go back to it, which is the case the mechanism was
-         * built for and has no equivalent complaint attached to it.
-         */
-        IntendedUrl::forget($request, 'customer');
-
-        return redirect()->route('home');
+        // Both roles now honour the destination their own guard remembered. A
+        // customer bounced off /appointments is returned there; one who simply
+        // opened /login still lands on home as the fallback.
+        return redirect()->to(IntendedUrl::pull($request, 'customer', route('home')));
     }
 
     /**
-     * Sign out.
-     *
-     * Three things happen here, and each covers a different way a signed-out
-     * browser could still be showing a customer's page:
-     *
-     *   1. the guard is logged out and the session invalidated, so the *next*
-     *      request for a protected page redirects to the login screen;
-     *   2. this response is marked uncacheable, so the browser does not keep the
-     *      logout redirect around either; and
-     *   3. `sessionSync` in `resources/js/app.js` announces `guest` from the
-     *      login page this redirects to, which is what takes any *other* tab
-     *      still showing a customer page to the login screen.
-     *
-     * The `PreventAuthenticatedCaching` middleware covers (2) for every
-     * authenticated response; it is repeated here because `/logout` is behind
-     * `auth` on the way in but is not itself an authenticated page — it is the
-     * boundary between the two states, so its own response must not be a
-     * candidate for the Back button either.
+     * Sign out (shared across customer and admin roles; always redirects to /login).
      */
     public function destroy(Request $request): RedirectResponse
     {
         Auth::guard('web')->logout();
+        Auth::guard('admin')->logout();
 
         $request->session()->invalidate();
         $request->session()->regenerateToken();
 
-        return $this->uncacheable(redirect()->route('home'));
+        return $this->uncacheable(redirect()->route('login'));
     }
 
     /**
@@ -150,6 +138,20 @@ class AuthenticatedSessionController extends Controller
     }
 
     /**
+     * @return array<string, string>
+     */
+    private function errorMessages(LoginRequest $request, string $message): array
+    {
+        $messages = ['login' => $message];
+
+        if ($request->has('username')) {
+            $messages['username'] = $message;
+        }
+
+        return $messages;
+    }
+
+    /**
      * @throws ValidationException
      */
     private function ensureIsNotRateLimited(LoginRequest $request): void
@@ -160,9 +162,9 @@ class AuthenticatedSessionController extends Controller
 
         $seconds = RateLimiter::availableIn($this->throttleKey($request));
 
-        throw ValidationException::withMessages([
-            'login' => "Too many login attempts. Please try again in {$seconds} seconds.",
-        ]);
+        throw ValidationException::withMessages(
+            $this->errorMessages($request, "Too many login attempts. Please try again in {$seconds} seconds.")
+        );
     }
 
     private function throttleKey(LoginRequest $request): string

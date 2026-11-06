@@ -250,15 +250,15 @@ public function test_validity_lives_in_the_text_column(): void
         $this->assertGreaterThan($media, $validity);
     }
 
-    /** The card's call to action goes to the booking form. */
-    public function test_the_promo_card_links_to_the_booking_form(): void
+    /** The card's call to action goes to the services the promo advertises. */
+    public function test_the_promo_card_links_to_the_services_section(): void
     {
         $this->makePromo();
 
         $html = $this->get(route('promos.index'))->assertOk()->getContent();
 
         $this->assertStringContainsString('Book Now', $html);
-        $this->assertStringContainsString('href="'.route('appointments.create').'"', $html);
+        $this->assertStringContainsString('href="'.route('home').'#services"', $html);
     }
 
     /**
@@ -337,7 +337,7 @@ public function test_validity_lives_in_the_text_column(): void
 
         // Escaped, because the trading name contains an ampersand.
         $this->assertStringContainsString(e(config('salon.name')), $footer);
-        $this->assertStringContainsString('href="'.route('admin.login').'"', $footer);
+        $this->assertStringContainsString('href="'.route('login').'"', $footer);
     }
 
     /**

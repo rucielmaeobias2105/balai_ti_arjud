@@ -185,7 +185,7 @@ class BookingRulesTest extends TestCase
         // unauthenticated request is redirected to the login screen and asserts
         // nothing about the picker.
         $html = $this->actingAs($this->makeUser())
-            ->get(route('appointments.create'))
+            ->get($this->bookingUrl())
             ->assertOk()
             ->getContent();
 
@@ -202,7 +202,7 @@ class BookingRulesTest extends TestCase
     public function test_booking_for_today_is_rejected_by_the_server(): void
     {
         $this->actingAs($this->makeUser())
-            ->from(route('appointments.create'))
+            ->from($this->bookingUrl())
             ->post(route('appointments.store'), $this->payload($this->makeService(), today()->toDateString()))
             ->assertSessionHasErrors('preferred_date');
 
@@ -214,7 +214,7 @@ class BookingRulesTest extends TestCase
         $tomorrow = today()->addDay();
 
         $this->actingAs($this->makeUser())
-            ->from(route('appointments.create'))
+            ->from($this->bookingUrl())
             ->post(route('appointments.store'), $this->payload($this->makeService(), $tomorrow->toDateString()))
             // With `?view=ID`, which is where a booking lands: the dialog for the
             // one just made opens on the list rather than the customer having to
@@ -281,7 +281,7 @@ class BookingRulesTest extends TestCase
         $tooFar = Carbon::parse(today()->addDays(31));
 
         $this->actingAs($this->makeUser())
-            ->from(route('appointments.create'))
+            ->from($this->bookingUrl())
             ->post(route('appointments.store'), $this->payload($this->makeService(), $tooFar->toDateString()))
             ->assertSessionHasErrors('preferred_date');
 
@@ -307,7 +307,7 @@ class BookingRulesTest extends TestCase
         $this->assertContains('We are closed on Sundays.', $problems);
 
         $this->actingAs($this->makeUser())
-            ->from(route('appointments.create'))
+            ->from($this->bookingUrl())
             ->post(route('appointments.store'), $this->payload($this->makeService(), $sunday->toDateString()))
             ->assertSessionHasErrors('preferred_date');
     }
@@ -373,7 +373,7 @@ class BookingRulesTest extends TestCase
     public function test_booking_for_today_raises_an_amber_toast(): void
     {
         $this->actingAs($this->makeUser())
-            ->from(route('appointments.create'))
+            ->from($this->bookingUrl())
             ->post(route('appointments.store'), $this->payload($this->makeService(), today()->toDateString()))
             ->assertSessionHas('toast', [
                 'type' => 'warning',

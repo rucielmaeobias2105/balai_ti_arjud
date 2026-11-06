@@ -91,9 +91,9 @@ class AppointmentArchiver
      *
      * @return int Number of appointments archived.
      */
-    public function sweep(?Carbon $asOf = null): int
+    public function sweep(?Carbon $asOf = null, int $days = self::DAYS_BEFORE_AUTO_ARCHIVE): int
     {
-        $cutoff = ($asOf ?? now())->copy()->subDays(self::DAYS_BEFORE_AUTO_ARCHIVE);
+        $cutoff = ($asOf ?? now())->copy()->subDays($days);
 
         // `completed_at` rather than `preferred_date`: the clock that matters is
         // when the visit finished, not when it was booked for. A booking marked
@@ -130,9 +130,9 @@ class AppointmentArchiver
      * place that defines the sweep's scope rather than the query living in the
      * console command.
      */
-    public function sweepableCount(?Carbon $asOf = null): int
+    public function sweepableCount(?Carbon $asOf = null, int $days = self::DAYS_BEFORE_AUTO_ARCHIVE): int
     {
-        $cutoff = ($asOf ?? now())->copy()->subDays(self::DAYS_BEFORE_AUTO_ARCHIVE);
+        $cutoff = ($asOf ?? now())->copy()->subDays($days);
 
         return Appointment::query()
             ->active()

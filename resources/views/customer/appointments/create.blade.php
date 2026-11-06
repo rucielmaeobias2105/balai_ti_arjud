@@ -1,27 +1,18 @@
 {{--
     Book Appointment (Customer Flow 5), rebuilt as one wizard card.
 
-    THE SEVEN STEPS ARE NOW FOUR
+    THE SERVICE PICKER IS NOT A STEP
 
-    The form was seven steps. It is four, and the merges are not cosmetic — each
-    one joined two panels that were asking for the same gesture.
+    Services are chosen on the Browse Services page, where every category card
+    can send several at once through `?services[]=`. That means `/book` never
+    has to ask what to book: it receives the basket in the query string and puts
+    it straight into the Booking Summary. A request with no valid service goes
+    back to the Services section with a short message.
 
-    Step 2 ("Your Details") and step 3 ("Preferred Date & Time") are one step
-    now: who you are and when you want to come are the same two minutes of the
-    customer's life, and asking them to press Continue between them only risked
-    losing what they had typed.
-
-    Step 5 ("Last Service(s) Availed") and step 6 ("Choose Technician & Special
-    Request") are one step now, for the same reason.
-
-    Step 7 was a card whose entire content was one checkbox. It is gone as a
-    step; the agreement sits on the last card, directly above the Confirm Booking
-    button, which is where a customer expects the last thing before a booking to
-    be the thing they agree to.
-
-    What is left is genuinely four decisions — what to book, who you are and
-    when, anything we should know, and how you have had it before and who you
-    want — and three Continue clicks instead of six.
+    What is left is three decisions — who you are and when you want to come,
+    anything we should know, and how you have had it before and who you want —
+    and two Continue clicks instead of five. The agreement still sits on the last
+    card, directly above the Confirm Booking button.
 
     THE FORM IS ONE CARD
 
@@ -56,7 +47,7 @@
 
     WHAT IS LEFT OF THE HEADER
 
-    A "Step 2 of 4" counter and nothing else. The row of clickable step pills is
+    A "Step 1 of 3" counter and nothing else. The row of clickable step pills is
     gone: it restated the counter, took a second band of vertical space above the
     first question, and wrapped into two ragged rows on a phone, where it read as a
     menu rather than as progress. With nothing gated, jumping was never needed —
@@ -90,10 +81,12 @@
                 $service->id => [
                     'name' => $service->name,
                     'category' => $service->category,
+                    'categoryKey' => \Illuminate\Support\Str::slug($service->category ?: 'uncategorised'),
                     'price' => PriceFormatter::display($service->price, 'Price on request'),
                     'basePrice' => $service->base_price === null ? null : (float) $service->base_price,
-                    'bookable' => $service->base_price !== null
-                        || $service->variants->contains(fn ($v) => $v->base_price !== null),
+                    'bookable' => ! $service->isUnavailable()
+                        && ($service->base_price !== null
+                            || $service->variants->contains(fn ($v) => $v->base_price !== null)),
                     'baseDuration' => (int) $service->duration_minutes,
                     'variants' => $service->variants
                         // A variant with no amount is left out rather than
@@ -210,7 +203,7 @@
             <input type="hidden" name="idempotency_key" value="{{ old('idempotency_key', Str::uuid()->toString()) }}">
 
             <div class="grid gap-8 lg:grid-cols-3">
-                {{-- ================= THE ONE CARD: all four steps ================= --}}
+                {{-- ================= THE ONE CARD: all three steps ================= --}}
                 <div class="lg:col-span-2">
                     {{-- `scroll-mt-20` because `revealStep()` scrolls this card
                          to the top of the viewport, and the customer navbar is
@@ -221,7 +214,7 @@
 
                              This used to carry a row of seven clickable step pills as
                              well, so a customer could jump straight to any step. They
-                             are gone: they duplicated what the "Step 2 of 4" line
+                             are gone: they duplicated what the "Step 1 of 3" line
                              already said, took a whole extra band of vertical space
                              above the first question, and on a phone they wrapped
                              into two ragged rows that read as a menu rather than as
@@ -246,132 +239,6 @@
                         <div class="px-4 py-5 sm:px-6 sm:py-6">
 
                             {{-- ---------------------------------------------- 1 --}}
-                            <section x-show="step === 1" x-cloak>
-                                <h3 class="font-display text-lg font-semibold text-primary">1. Selected Service</h3>
-
-                                @if ($groupedServices->isEmpty())
-                                    <x-ui.empty title="No services available" description="Please check back soon." />
-                                @else
-                                    {{--
-                                        Grouped by category and capped at four, exactly as the
-                                        Browse Services page's cards do — so a customer who
-                                        has already read the price list on that page meets
-                                        the same four-then-reveal shape here, rather than a
-                                        flat grid of thirty checkboxes.
-
-                                        WHY THE EXPANDED STATE IS NOT LOCAL TO THE CATEGORY
-
-                                        Each disclosure used to be its own `x-data` scope
-                                        holding a bare `expanded` boolean. That is the right
-                                        shape for the price list, where a category card is
-                                        the whole of what the page is showing. It is the
-                                        wrong shape here, because this step is only one
-                                        panel of a form that re-renders around it: tick a
-                                        service, the basket in the summary re-renders; press
-                                        Continue or Back, the panel visibility flips; either
-                                        one re-initialises scopes under it, and the boolean
-                                        goes back to false. The customer opens a category,
-                                        goes to look at the date, comes back — and the
-                                        category has collapsed and forgotten they were
-                                        looking at it.
-
-                                        So the state lives on the form's own scope instead,
-                                        keyed by category, in `bookingForm.expandedCategories`.
-                                        One object survives every re-render of this list, and
-                                        it is per category, so opening Manicure leaves
-                                        Threading as it was.
-
-                                        The `serviceCategory()` component is still what the
-                                        Browse Services page uses. It is not shared with
-                                        this form, because this form needs the opposite
-                                        lifetime.
-                                    --}}
-                                    <div class="mt-4 space-y-5">
-                                        @foreach ($groupedServices as $category => $services)
-                                            @php
-                                                $preview = $services->take(4);
-                                                $hidden = $services->count() - $preview->count();
-                                                // The category name as a JS object key. Slugged so
-                                                // it is stable in source and safe as a property
-                                                // name; a name is what the form already groups
-                                                // by, so nothing new has to be kept in step.
-                                                $categoryKey = \Illuminate\Support\Str::slug($category ?: 'uncategorised');
-                                            @endphp
-
-                                            <div data-booking-category="{{ $categoryKey }}">
-                                                <div class="mb-2.5 flex items-baseline justify-between gap-3">
-                                                    <p class="text-xs font-semibold uppercase tracking-wider text-gold-dark">{{ $category }}</p>
-                                                    <p class="text-xs text-ink-muted">
-                                                        {{ $services->count() }} {{ Str::plural('service', $services->count()) }}
-                                                    </p>
-                                                </div>
-
-                                                <div class="grid gap-2.5 sm:grid-cols-2">
-                                                    @foreach ($preview as $service)
-                                                        <x-salon.service-choice :service="$service" />
-                                                    @endforeach
-
-                                                    {{-- The rest of the category. The same component as
-                                                         the visible rows, carrying the key that hides
-                                                         them — which is the reason the row is a
-                                                         component, and why the key is passed as
-                                                         data rather than written here as an
-                                                         attribute: an attribute on a component tag
-                                                         is a literal string, never compiled as
-                                                         Blade, so an `x-show` written here reached
-                                                         the browser as literal text and hid nothing.
-                                                         The component emits it instead.
-
-                                                         Read the parent's key rather than a local
-                                                         boolean, so ticking a service, changing a
-                                                         quantity, or leaving and returning to this
-                                                         step cannot collapse what was opened. --}}
-                                                    @foreach ($services->slice(4) as $service)
-                                                        <x-salon.service-choice
-                                                            :service="$service"
-                                                            :expanded-key="$categoryKey"
-                                                        />
-                                                    @endforeach
-                                                </div>
-
-                                                @if ($hidden > 0)
-                                                    <div class="mt-2.5 flex justify-end">
-                                                        {{-- Plain markup, not a component tag, so
-                                                             `@js()` compiles here — that is the
-                                                             difference between this button working
-                                                             and the rows above it silently not
-                                                             hiding, when both used the same
-                                                             expression.
-
-                                                             `type="button"` so it can never submit
-                                                             the form, and the whole thing is Alpine
-                                                             state on the parent scope, so toggling
-                                                             changes no step and no scroll. --}}
-                                                        <button
-                                                            type="button"
-                                                            class="btn-ghost btn-sm"
-                                                            x-on:click="toggleCategory(@js($categoryKey))"
-                                                            :aria-expanded="isCategoryExpanded(@js($categoryKey))"
-                                                        >
-                                                            <span x-show="! isCategoryExpanded(@js($categoryKey))" x-cloak>See More ({{ $hidden }} more)</span>
-                                                            <span x-show="isCategoryExpanded(@js($categoryKey))" x-cloak>See Less</span>
-                                                        </button>
-                                                    </div>
-                                                @endif
-                                            </div>
-                                        @endforeach
-                                    </div>
-                                @endif
-
-                                @error('services')
-                                    <p class="input-error-text mt-3">{{ $message }}</p>
-                                @enderror
-                                @error('services.*')
-                                    <p class="input-error-text mt-3">{{ $message }}</p>
-                                @enderror
-                            </section>
-
-                            {{-- ---------------------------------------------- 2 --}}
                             {{--
                                 Your details and when you want to come, on one card.
 
@@ -397,8 +264,8 @@
                                 window' days. `StoreBookingRequest` re-checks it
                                 regardless — this is the hint, not the guarantee.
                             --}}
-                            <section x-show="step === 2" x-cloak>
-                                <h3 class="font-display text-lg font-semibold text-primary">2. Your Details &amp; Preferred Date &amp; Time</h3>
+                            <section x-show="step === 1" x-cloak>
+                                <h3 class="font-display text-lg font-semibold text-primary">1. Your Details &amp; Preferred Date &amp; Time</h3>
 
                                 <div class="mt-4 grid gap-4 sm:grid-cols-2">
                                     <x-ui.form.input
@@ -500,7 +367,7 @@
                                 @endguest
                             </section>
 
-                            {{-- ---------------------------------------------- 3 --}}
+                            {{-- ---------------------------------------------- 2 --}}
                             {{--
                                 Preferences & health notes, in the customer's own words.
 
@@ -541,8 +408,8 @@
                                 it used to fold the dropdown's answer together with
                                 this box, and now there is only the box.
                             --}}
-                            <section x-show="step === 3" x-cloak>
-                                <h3 class="font-display text-lg font-semibold text-primary">3. Preferences &amp; Health Notes</h3>
+                            <section x-show="step === 2" x-cloak>
+                                <h3 class="font-display text-lg font-semibold text-primary">2. Preferences &amp; Health Notes</h3>
 
                                 <div class="mt-4">
                                     {{--
@@ -571,7 +438,7 @@
                                 </div>
                             </section>
 
-                            {{-- ---------------------------------------------- 4 --}}
+                            {{-- ---------------------------------------------- 3 --}}
                             {{--
                                 What you last had, who you would like to see, anything
                                 you need, and the agreement — one card, and the last
@@ -612,8 +479,8 @@
                                 validation rule asks, so the field shown and the field
                                 required cannot disagree.
                             --}}
-                            <section x-show="step === 4" x-cloak>
-                                <h3 class="font-display text-lg font-semibold text-primary">4. Last Service(s) Availed, Technician &amp; Special Request</h3>
+                            <section x-show="step === 3" x-cloak>
+                                <h3 class="font-display text-lg font-semibold text-primary">3. Last Service(s) Availed, Technician &amp; Special Request</h3>
 
                                 <div class="mt-4">
                                     @if ($isRepeatCustomer)
@@ -923,7 +790,7 @@
                     rather than only from the step where you picked it.
 
                     It was already the one panel on this page that was not a numbered
-                    card, and keeping it that way is what lets the four steps
+                    card, and keeping it that way is what lets the three steps
                     live inside a single card without the page losing its anchor.
                 --}}
                 <div class="lg:col-span-1">
@@ -954,27 +821,15 @@
                                             <input type="hidden" :name="`services[${row.index}][service_variant_id]`" :value="row.variantId ?? ''">
 
                                             <div class="flex items-start justify-between gap-2">
-                                                <span class="min-w-0 flex-1 text-ink" x-text="row.name"></span>
+                                                <div class="min-w-0 flex-1">
+                                                    <p class="text-ink" x-text="row.name"></p>
+                                                    <p class="mt-0.5 text-[11px] text-ink-muted">
+                                                        <span x-text="row.advertised"></span> each
+                                                        &middot; Qty <span x-text="row.quantity"></span>
+                                                    </p>
+                                                </div>
                                                 <span class="shrink-0 font-medium text-primary" x-text="money(row.price * row.quantity)"></span>
                                             </div>
-                                            {{-- A range is not a fixed amount, so it is
-                                                 shown rather than totalled silently at
-                                                 the starting figure.
-
-                                                 The "Advertised as … final price
-                                                 confirmed at the salon" line that
-                                                 used to sit here is gone on
-                                                 request. It repeated the service
-                                                 name and its own price back to the
-                                                 customer immediately below the row
-                                                 that already carried both, which
-                                                 read as a second, smaller price
-                                                 rather than a reassurance.
-
-                                                 `row.advertised` is still sent by
-                                                 the controller and is still what
-                                                 the line item renders, so nothing
-                                                 downstream depends on this. --}}
                                             <div class="mt-1.5 flex items-center gap-2">
                                                 <select
                                                     class="rounded-lg border border-primary/15 bg-white px-2 py-1 text-[11px] text-ink"
@@ -1138,10 +993,10 @@
              * Which panel to open on.
              *
              * A refused booking comes back as a fresh render of this page, and
-             * this page opens on step 1. That was fine while the only things the
-             * server refused on step 1 were things the customer had left blank
-             * there; it stopped being fine the moment an error could belong to a
-             * panel that was not open. Tick everything, reach step 4, press
+                 * this page opens on step 1. That was fine while the only things the
+                 * server refused on step 1 were things the customer had left blank
+                 * there; it stopped being fine the moment an error could belong to a
+                 * panel that was not open. Tick everything, reach the last step, press
              * Confirm without ticking the agreement, and the toast said "You must
              * agree to the Terms and Conditions to book." on a page showing the
              * service list, with the box it was talking about three steps away.
@@ -1149,7 +1004,7 @@
              * So the server decides, from the error bag it already has, and sends
              * the answer rather than letting the browser guess. It is a step and
              * only ever a step — `BookingSteps::startStep()` maps every error onto
-             * one of the four panels, so this cannot introduce a fifth place for a
+             * one of the three panels, so this cannot introduce another place for a
              * message to be shown.
              *
              * 1 on a clean bag, so an untouched form opens where it always has.
@@ -1167,7 +1022,7 @@
          *
          * Owns the selected services, their variants and quantities, mirrors them
          * into the named inputs that StoreBookingRequest validates, keeps the
-         * read-only Booking Summary in sync, and moves the four steps one at a
+         * read-only Booking Summary in sync, and moves the three steps one at a
          * time.
          *
          * It gates nothing. Not the steps and not the submit: there is no
@@ -1193,7 +1048,7 @@
                 technicians: {},
 
                 /*
-                 * The two fields on step 2 and the agreement on the last step,
+                 * The two fields on step 1 and the agreement on the last step,
                  * held here rather than read from the DOM.
                  *
                  * They are bound with `x-model` so that the Continue button's
@@ -1312,23 +1167,6 @@
                  */
                 submitting: false,
 
-                /*
-                 * Which service categories the customer has expanded.
-                 *
-                 * Keyed by category rather than held in a per-category Alpine scope,
-                 * because this list re-renders around it: ticking a service redraws
-                 * the basket in the summary, and every step change flips panel
-                 * visibility. Either one re-initialises nested scopes underneath
-                 * this, so a local `expanded` boolean goes back to false and a
-                 * category the customer had opened silently collapses when they come
-                 * back to it.
-                 *
-                 * Living here, on the one scope that owns the form, it survives all
-                 * of that — and it is still per category, so opening Manicure &
-                 * Pedicure leaves Threading exactly as it was.
-                 */
-                expandedCategories: {},
-
                 /**
                  * The first selected service.
                  *
@@ -1360,7 +1198,7 @@
                     this.time = this.config.time || '';
                     this.technicianId = this.config.technicianId || '';
                     this.technicians = this.config.technicians || {};
-                    this.stepCount = Number(this.config.stepCount) || 4;
+                    this.stepCount = Number(this.config.stepCount) || 3;
 
                     /*
                      * Which panel to open on, from the server.
@@ -1452,7 +1290,7 @@ this.minDate = this.config.minDate || '';
 
                     if (!Number.isFinite(target)) return;
 
-                    // The calendar panel belongs to step 2. Leaving it open across a
+                    // The calendar panel belongs to step 1. Leaving it open across a
                     // step change would leave it floating over a panel it has nothing
                     // to do with, at a position measured against a field that is no
                     // longer on screen.
@@ -1547,13 +1385,12 @@ this.minDate = this.config.minDate || '';
                  * These are the same fields `StoreBookingRequest` requires, and
                  * deliberately no more:
                  *
-                 *   step 1 - at least one service;
-                 *   step 2 - name, phone, date and time, all required by the
+                 *   step 1 - name, phone, date and time, all required by the
                  *            server, with the phone held to the same shape it
                  *            validates against so a customer is not let through
                  *            to a refusal they could have been spared;
-                 *   step 3 - nothing: the health note is optional;
-                 *   step 4 - the agreement, plus the last-services answer, which
+                 *   step 2 - nothing: the health note is optional;
+                 *   step 3 - the agreement, plus the last-services answer, which
                  *            only a first-time customer is asked for.
                  *
                  * Optional fields are not gated. Demanding a special request, or
@@ -1565,11 +1402,7 @@ this.minDate = this.config.minDate || '';
                 missingOnCurrentStep() {
                     const missing = [];
 
-                    if (this.step === 1 && this.selectedIds.length === 0) {
-                        missing.push('Choose at least one service');
-                    }
-
-                    if (this.step === 2) {
+                    if (this.step === 1) {
                         if (this.customerName.trim() === '') {
                             missing.push('Enter your full name');
                         }
@@ -1595,7 +1428,7 @@ this.minDate = this.config.minDate || '';
                      *
                      * Both hold the same number, but only one of them is a number:
                      * `config` is whatever the server sent, and a panel whose
-                     * comparison is `this.step === "4"` is false for the rest of
+                     * comparison is `this.step === "3"` is false for the rest of
                      * time. The agreement would then never be gated — a customer
                      * could Confirm without ticking it and be refused by the
                      * server, which is the exact refusal this wizard now avoids
@@ -1632,62 +1465,6 @@ this.minDate = this.config.minDate || '';
                     if (! this.config.requiresLastServices) return true;
 
                     return this.lastServicesNote.trim() !== '';
-                },
-
-                /* ---------------------------------------------------------------- */
-                /* Step 1 — which service categories are expanded                   */
-                /* ---------------------------------------------------------------- */
-
-                /**
-                 * Has this category been opened past its first four services?
-                 *
-                 * A read, not a write, so the button label, its `aria-expanded` and
-                 * every hidden row all ask the same question of the same place. If
-                 * they each kept their own copy of the flag they would disagree the
-                 * first time one of them re-rendered.
-                 */
-                isCategoryExpanded(key) {
-                    return Boolean(this.expandedCategories[key]);
-                },
-
-                /**
-                 * Open or close one category, leaving the others as they are.
-                 *
-                 * Reassigned rather than mutated: Alpine's reactivity is proxy-based,
-                 * so `expandedCategories[key] = true` would change the object
-                 * without telling the `x-show` bindings watching it. The whole map
-                 * being replaced is what makes every open row appear.
-                 */
-                toggleCategory(key) {
-                    this.expandedCategories = {
-                        ...this.expandedCategories,
-                        [key]: ! this.expandedCategories[key],
-                    };
-                },
-
-                /* ---------------------------------------------------------------- */
-                /* Basket                                                            */
-                /* ---------------------------------------------------------------- */
-
-                isSelected(id) {
-                    return this.selectedIds.includes(Number(id));
-                },
-
-                toggle(id, checked) {
-                    const meta = this.catalogue[Number(id)];
-
-                    // Nothing to charge means nothing to total, so a service whose
-                    // admin has not set an amount is not bookable. The server
-                    // refuses it too; this is only here so the tick does not lie.
-                    if (checked && meta && meta.bookable === false) return;
-
-                    if (checked) {
-                        this.buildRow(Number(id), null, 1);
-                    } else {
-                        this.rows = this.rows.filter((row) => row.serviceId !== Number(id));
-                    }
-
-                    this.reindex();
                 },
 
                 buildRow(serviceId, variantId, quantity) {

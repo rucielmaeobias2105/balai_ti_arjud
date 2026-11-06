@@ -42,6 +42,13 @@ final class PriceFormatter
 
     /**
      * Show a price, or an honest stand-in when there is not one to show.
+     *
+     * Most prices are advertised strings and are shown as typed, with a peso
+     * sign added only when the value does not already carry one. The exception
+     * is a price phrased as "starts @ 500": prefixing that with a peso sign
+     * produced "₱starts @ 500", which reads as broken text rather than a price.
+     * It is normalised to "Starts @ ₱500" instead, with the number formatted so
+     * "2300" becomes "2,300".
      */
     public static function display(mixed $price, string $empty = 'Price on request'): string
     {
@@ -51,7 +58,22 @@ final class PriceFormatter
             return $empty;
         }
 
+        if (preg_match('/\bstarts\s*@\s*([0-9][0-9,]*(?:\.[0-9]+)?)/iu', $value, $matches)) {
+            return 'Starts @ '.self::PESO.self::formatFigure($matches[1]);
+        }
+
         return str_contains($value, self::PESO) ? $value : self::PESO.$value;
+    }
+
+    /**
+     * A figure with thousands separators, keeping any decimals that were typed.
+     */
+    private static function formatFigure(string $figure): string
+    {
+        $plain = str_replace(',', '', $figure);
+        $decimals = str_contains($plain, '.') ? strlen(substr(strrchr($plain, '.'), 1)) : 0;
+
+        return number_format((float) $plain, $decimals, '.', ',');
     }
 
     /**

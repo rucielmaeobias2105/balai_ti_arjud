@@ -15,7 +15,7 @@
     <meta name="bta-session" content="{{ \App\Support\SessionIdentity::key() }}">
     <meta name="bta-home-admin" content="{{ route('admin.dashboard') }}">
     <meta name="bta-home-web" content="{{ route('home') }}">
-    <meta name="bta-login-admin" content="{{ route('admin.login') }}">
+    <meta name="bta-login-admin" content="{{ route('login') }}">
     <meta name="bta-login-web" content="{{ route('login') }}">
 
     {{-- Where the liveness probe lives. Published rather than hardcoded in

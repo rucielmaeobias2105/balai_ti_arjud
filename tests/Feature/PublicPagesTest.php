@@ -331,26 +331,19 @@ class PublicPagesTest extends TestCase
         $this->get('/about')->assertOk()->assertSee('About Us');
     }
 
-    public function test_the_admin_login_page_is_public(): void
+    public function test_the_unified_login_page_is_public_and_the_old_admin_url_redirects(): void
     {
-        $html = $this->get('/admin/login')
+        $html = $this->get('/login')
             ->assertOk()
-            ->assertSee('Admin Login')
+            ->assertSee('Welcome Back')
+            ->assertSee('Username or Email')
             ->getContent();
 
-        /*
-         * The "Staff Portal" pill used to sit above that heading. It went: the
-         * URL is /admin/login, the tab title says ADMIN SIGN IN, and the panel
-         * beside it lists what an admin manages — three labels for one fact.
-         *
-         * Scoped to the form card rather than the whole document, because the
-         * customer footer carries a "Staff Portal" *link* — which is a different
-         * thing on a different page, and is the only remaining way in for a
-         * customer who needs the staff login.
-         */
         $card = substr($html, (int) strpos($html, 'admin-auth-card'), (int) strrpos($html, '</main>') - (int) strpos($html, 'admin-auth-card'));
 
         $this->assertStringNotContainsString('Staff Portal', $card);
+
+        $this->get('/admin/login')->assertRedirect(route('login'));
     }
 
     public function test_the_password_reset_flow_starts_at_the_email_step(): void

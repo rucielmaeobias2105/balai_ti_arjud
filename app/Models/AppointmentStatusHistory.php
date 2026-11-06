@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\AppointmentStatus;
 use App\Enums\ChangedBy;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -23,6 +24,7 @@ class AppointmentStatusHistory extends Model
         'changed_by_id',
         'changed_by_name',
         'note',
+        'archived_at',
     ];
 
     protected function casts(): array
@@ -31,7 +33,18 @@ class AppointmentStatusHistory extends Model
             'from_status' => AppointmentStatus::class,
             'to_status' => AppointmentStatus::class,
             'changed_by' => ChangedBy::class,
+            'archived_at' => 'datetime',
         ];
+    }
+
+    public function scopeActive(Builder $query): Builder
+    {
+        return $query->whereNull('archived_at');
+    }
+
+    public function scopeArchived(Builder $query): Builder
+    {
+        return $query->whereNotNull('archived_at');
     }
 
     public function appointment(): BelongsTo

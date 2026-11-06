@@ -236,7 +236,7 @@ class FormMethodMatchesRouteTest extends TestCase
 
         return [
             'customer appointments' => route('appointments.index'),
-            'customer booking' => route('appointments.create'),
+            'customer booking' => $this->bookingUrl(),
             'customer cancel' => route('appointments.cancel', $confirmed),
             'customer reschedule' => route('appointments.reschedule', $confirmed),
             'customer profile' => route('profile.edit'),

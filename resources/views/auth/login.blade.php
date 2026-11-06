@@ -70,4 +70,5 @@
         Don't have an account?
         <a href="{{ route('register') }}" class="font-medium text-primary underline underline-offset-2 hover:text-primary-dark">Register</a>
     </p>
+
 @endsection

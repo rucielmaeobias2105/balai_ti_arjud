@@ -181,7 +181,10 @@ class Appointment extends Model
     {
         // Newest first, with id as the tiebreaker: several transitions can
         // land in the same second, and `latest()` alone is then non-deterministic.
+        // Excludes archived activity logs from active UI lists while keeping the
+        // rows in `appointment_status_history` for audit/reporting integrity.
         return $this->hasMany(AppointmentStatusHistory::class)
+            ->whereNull('archived_at')
             ->orderByDesc('created_at')
             ->orderByDesc('id');
     }

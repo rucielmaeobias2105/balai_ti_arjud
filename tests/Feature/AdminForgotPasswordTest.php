@@ -103,14 +103,16 @@ class AdminForgotPasswordTest extends TestCase
     /* 1. The link exists and is reachable                                 */
     /* ------------------------------------------------------------------ */
 
-    public function test_the_login_page_links_to_the_reset_request(): void
+    public function test_the_login_page_no_longer_links_to_the_admin_reset_request(): void
     {
-        $html = $this->get(route('admin.login'))->assertOk()->getContent();
+        $html = $this->get(route('login'))->assertOk()->getContent();
 
-        // An `href`, not a placeholder. The old markup was a `<span>` with
-        // `aria-disabled`, which read as a link and did nothing.
-        $this->assertStringContainsString(route('admin.password.request'), $html);
-        $this->assertStringNotContainsString('aria-disabled', $html);
+        // The "Staff member? Reset your password" line was removed from the
+        // customer login. The admin reset routes still exist for support to
+        // reach directly, but they are no longer advertised to every customer.
+        $this->assertStringNotContainsString(route('admin.password.request'), $html);
+        $this->assertStringNotContainsString('Staff member', $html);
+        $this->assertTrue(Route::has('admin.password.request'));
     }
 
     public function test_the_request_page_renders(): void
@@ -327,13 +329,13 @@ class AdminForgotPasswordTest extends TestCase
         // 5. The old one no longer works.
         Auth::guard('admin')->logout();
 
-        $this->post(route('admin.login'), [
+        $this->post(route('login.store'), [
             'username' => 'staff',
             'password' => 'the-old-password',
         ])->assertSessionHasErrors('username');
 
         // …and the new one does.
-        $this->post(route('admin.login'), [
+        $this->post(route('login.store'), [
             'username' => 'staff',
             'password' => 'a-brand-new-password',
         ])->assertRedirect(route('admin.dashboard'));

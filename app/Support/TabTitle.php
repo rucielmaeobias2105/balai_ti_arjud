@@ -71,22 +71,19 @@ class TabTitle
     /**
      * The count the admin side shows.
      *
-     * The same two numbers the two sidebar badges show — unseen bookings and
-     * unopened enquiries — so the title cannot disagree with the badges beside
-     * it.
+     * This is the number beside the one badged admin row: unseen bookings. It
+     * used to add unread contact enquiries as well, which meant the tab could
+     * say "(2)" while every visible notification surface was empty — the
+     * Messages row is no longer in the admin nav, so those enquiries had no row
+     * to badge and the customer could not tell where the number came from.
      *
-     * The bookings half is `Appointment::unseenForAdminCount()` rather than a
-     * Pending count, and that is the whole fix. It used to be a Pending count,
-     * which is a status rather than an acknowledgement: nothing about opening a
-     * page changed it, so the prefix stayed on the tab for as long as a booking
-     * sat undecided — on the Appointments page itself included, where the admin
-     * had the list open in front of them and was being told there were two
-     * unread things about the screen they were reading. Unseen bookings are
-     * marked seen when that page is opened, so the prefix now means "something
-     * has arrived that you have not looked at", and leaves when they look.
-     *
-     * Both halves come from the model and the same scopes the sidebar uses, so
-     * this cannot drift from the badges next to it.
+     * `Appointment::unseenForAdminCount()` is used rather than a Pending count,
+     * and that is deliberate. A Pending count is a status rather than an
+     * acknowledgement: nothing about opening a page changes it, so the prefix
+     * stayed on the tab for as long as a booking sat undecided. Unseen bookings
+     * are marked seen when the Appointments screen is opened, so the prefix
+     * means "something has arrived that you have not looked at", and leaves
+     * when they look. It also matches the badge beside it.
      */
     public static function adminUnread(): int
     {
@@ -94,7 +91,6 @@ class TabTitle
             return 0;
         }
 
-        return \App\Models\Appointment::unseenForAdminCount()
-            + (int) \App\Models\ContactMessage::query()->unread()->count();
+        return \App\Models\Appointment::unseenForAdminCount();
     }
 }

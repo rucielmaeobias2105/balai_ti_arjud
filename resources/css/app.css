@@ -1379,8 +1379,8 @@
 
     /* Customer sign-in and register carry short, single-column forms, so the
      * 680px default left a lot of dead space either side of the inputs. This
-     * modifier trims the card to hug its content. The staff portal still opts
-     * into the wide default via `$wideCard` on AdminSessionController. */
+     * modifier trims the card to hug its content. The unified login uses it too:
+     * staff and customers now share the same form. */
     .admin-auth-card-narrow {
         width: min(100%, 520px);
     }

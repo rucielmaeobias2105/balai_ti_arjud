@@ -39,25 +39,43 @@
     link, since a hover affordance on something that is not clickable is worse
     than no affordance at all.
 --}}
+@php
+    $from = $service->variants->firstWhere(fn ($v) => $v->base_price !== null);
+    $bookable = ! $service->isUnavailable() && ($from !== null || $service->base_price !== null);
+    $charge = $service->base_price ?? $from?->base_price;
+@endphp
 <li class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2 first:pt-0" {{ $attributes }}>
-    <div class="min-w-0 flex-1">
-        <p class="text-sm font-medium text-primary">{{ $service->name }}</p>
+    <div class="flex min-w-0 flex-1 items-start gap-2.5">
+        <input
+            type="checkbox"
+            class="checkbox mt-0.5 shrink-0"
+            data-service-checkbox
+            data-service-price="{{ $charge !== null ? (float) $charge : 0 }}"
+            value="{{ $service->slug }}"
+            x-model="selected"
+            @disabled(! $bookable)
+            aria-label="Select {{ $service->name }}"
+        >
 
-        {{-- The duration line ("1 hr", "1 hr 15 min", "30 min") is gone: this
-             list is a price list, and the only two facts a row carried beyond
-             the name were how long it takes and what it costs. Only the price
-             stays, so the secondary line now exists solely for the Sold Out
-             badge and is emitted only when there is one — an always-present
-             `<p>` holding nothing renders an empty band under the name.
+        <div class="min-w-0 flex-1">
+            <p class="text-sm font-medium text-primary">{{ $service->name }}</p>
 
-             `duration_minutes` itself is untouched: it is what the slot
-             generator and the availability rules read, so removing the label
-             hides a fact from the list without changing any booking. --}}
-        @if ($service->isUnavailable())
-            <p class="mt-0.5">
-                <x-ui.badge status="sold_out" label="Sold Out" />
-            </p>
-        @endif
+            {{-- The duration line ("1 hr", "1 hr 15 min", "30 min") is gone: this
+                 list is a price list, and the only two facts a row carried beyond
+                 the name were how long it takes and what it costs. Only the price
+                 stays, so the secondary line now exists solely for the Sold Out
+                 badge and is emitted only when there is one — an always-present
+                 `<p>` holding nothing renders an empty band under the name.
+
+                 `duration_minutes` itself is untouched: it is what the slot
+                 generator and the availability rules read, so removing the label
+                 hides a fact from the list without changing any booking. --}}
+            @if ($service->isUnavailable())
+                <p class="mt-0.5">
+                    <x-ui.badge status="sold_out" label="Sold Out" />
+                </p>
+            @endif
+        </div>
     </div>
 
     <div class="flex shrink-0 items-center gap-2">

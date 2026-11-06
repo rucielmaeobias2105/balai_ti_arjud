@@ -36,7 +36,7 @@
     </form>
 
     <p class="mt-6 text-center text-sm text-ink-muted">
-        <a href="{{ route('admin.login') }}" class="font-medium text-primary underline underline-offset-2 hover:text-primary-dark">
+        <a href="{{ route('login') }}" class="font-medium text-primary underline underline-offset-2 hover:text-primary-dark">
             Back to log in
         </a>
     </p>

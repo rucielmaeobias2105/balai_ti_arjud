@@ -483,7 +483,7 @@ class AdminUnseenAppointmentsTest extends TestCase
      * the booking half and the Messages badge is the enquiry half, so the title
      * agreeing with the sum of the two badges beside it is the property.
      */
-    public function test_the_title_is_the_sum_of_the_two_sidebar_badges(): void
+    public function test_the_title_matches_the_appointments_badge(): void
     {
         $admin = $this->admin();
 
@@ -500,8 +500,9 @@ class AdminUnseenAppointmentsTest extends TestCase
 
         $html = $this->actingAs($admin, 'admin')->get(route('admin.dashboard'))->assertOk()->getContent();
 
-        // Two unseen bookings plus one enquiry.
-        $this->assertStringStartsWith('(3) ', $this->title($html));
+        // Two unseen bookings. The enquiry is not a visible notification row any
+        // more, so it must not inflate the title.
+        $this->assertStringStartsWith('(2) ', $this->title($html));
     }
 
     /* ------------------------------------------------------------------ */

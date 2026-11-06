@@ -61,7 +61,7 @@
 
                             <div class="home-promo-foot">
                                 <p class="home-promo-validity">Valid {{ $offer->validity_label }}</p>
-                                <a href="{{ route('appointments.create') }}" class="btn-primary btn-sm shrink-0">
+                                <a href="{{ route('home') }}#services" class="btn-primary btn-sm shrink-0">
                                     Book Now
                                 </a>
                             </div>

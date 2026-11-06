@@ -33,6 +33,12 @@ $app = Application::configure(basePath: dirname(__DIR__))
             'auth.customer' => AuthenticateCustomer::class,
             'auth.admin' => AuthenticateAdmin::class,
             'admin.role' => EnsureAdminRole::class,
+            // The unified login is shared by both guards, so the stock `guest`
+            // middleware (which only looks at the default `web` guard) would let
+            // a signed-in admin open the form, and would block a customer from
+            // switching to an admin account. The application's version checks
+            // both guards and sends each to its own home.
+            'guest' => RedirectIfAuthenticated::class,
             'admin.guest' => RedirectIfAuthenticatedAdmin::class,
             'user.active' => EnsureUserIsActive::class,
         ]);

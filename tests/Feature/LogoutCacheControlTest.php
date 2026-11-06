@@ -44,7 +44,8 @@ class LogoutCacheControlTest extends TestCase
     /** @dataProvider protectedCustomerPages */
     public function test_customer_pages_are_marked_uncacheable(string $path): void
     {
-        $response = $this->actingAs($this->makeUser())->get($path)->assertOk();
+        $url = $path === '/book' ? $this->bookingUrl() : $path;
+        $response = $this->actingAs($this->makeUser())->get($url)->assertOk();
 
         $this->assertStringContainsString(
             'no-store',
@@ -56,7 +57,8 @@ class LogoutCacheControlTest extends TestCase
     /** @dataProvider protectedCustomerPages */
     public function test_customer_pages_send_the_pragma_and_expires_backstops(string $path): void
     {
-        $response = $this->actingAs($this->makeUser())->get($path)->assertOk();
+        $url = $path === '/book' ? $this->bookingUrl() : $path;
+        $response = $this->actingAs($this->makeUser())->get($url)->assertOk();
 
         $this->assertSame('no-cache', $response->headers->get('Pragma'));
         $this->assertSame('Wed, 11 Jan 1984 05:00:00 GMT', $response->headers->get('Expires'));
@@ -98,7 +100,7 @@ class LogoutCacheControlTest extends TestCase
     {
         $response = $this->actingAs($this->makeUser())
             ->post('/logout')
-            ->assertRedirect(route('home'));
+            ->assertRedirect(route('login'));
 
         $this->assertStringContainsString('no-store', $response->headers->get('Cache-Control'));
     }
@@ -107,7 +109,7 @@ class LogoutCacheControlTest extends TestCase
     {
         $response = $this->actingAs($this->makeAdmin(), 'admin')
             ->post('/admin/logout')
-            ->assertRedirect(route('admin.login'));
+            ->assertRedirect(route('login'));
 
         $this->assertStringContainsString('no-store', $response->headers->get('Cache-Control'));
     }
@@ -135,7 +137,7 @@ class LogoutCacheControlTest extends TestCase
 
         $this->post('/admin/logout');
 
-        $this->get('/admin')->assertRedirect(route('admin.login'));
+        $this->get('/admin')->assertRedirect(route('login'));
     }
 
     /* ------------------------------------------------------------------ */

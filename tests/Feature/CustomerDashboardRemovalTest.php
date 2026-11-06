@@ -175,7 +175,7 @@ class CustomerDashboardRemovalTest extends TestCase
      */
     public function test_the_layouts_send_a_stale_customer_tab_to_the_home_page(): void
     {
-        foreach ([route('home'), route('login'), route('admin.login')] as $path) {
+        foreach ([route('home'), route('login'), route('login')] as $path) {
             $html = $this->get($path)->assertOk()->getContent();
 
             $this->assertStringContainsString(

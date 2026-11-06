@@ -137,9 +137,12 @@ class AdminNotificationCountTest extends TestCase
         $this->assertStringContainsString('"pending":1', $plain);
         $this->assertStringContainsString('"unread":2', $plain);
 
-        // And the tab title is the sum of the two, from that same source.
+        // The tab title counts only the unseen booking. The two enquiries still
+        // travel in the poller's payload for the Messages screen's unread pill,
+        // but the Messages row is not in the admin nav, so they must not put a
+        // number in the title with no visible notification behind it.
         $this->assertMatchesRegularExpression(
-            '/<title>\(3\) DASHBOARD \| Balai ti Arjud Admin<\/title>/',
+            '/<title>\(1\) DASHBOARD \| Balai ti Arjud Admin<\/title>/',
             $html,
         );
     }
@@ -162,19 +165,35 @@ class AdminNotificationCountTest extends TestCase
     /* Tab title                                                           */
     /* ------------------------------------------------------------------ */
 
-    public function test_the_tab_title_carries_the_unread_count(): void
+    public function test_the_tab_title_carries_the_unseen_booking_count(): void
     {
         $admin = $this->makeAdmin();
+
+        // Enquiries no longer contribute: there is no Messages row to badge and
+        // no notification list to open, so they must not leave a count behind.
         $this->makeMessage();
         $this->makeMessage();
+        $this->makeAppointment($this->makeUser(), null, ['status' => AppointmentStatus::Pending]);
 
         // Asserted through an authenticated request rather than by calling the
         // helper directly: `adminUnread()` reads the guard, so calling it on the
         // test's own would always answer zero and prove nothing.
         $this->actingAs($admin, 'admin')
-            ->get(route('admin.appointments.index'))
+            ->get(route('admin.dashboard'))
             ->assertOk()
-            ->assertSee('<title>(2) APPOINTMENTS | Balai ti Arjud Admin</title>', false);
+            ->assertSee('<title>(1) DASHBOARD | Balai ti Arjud Admin</title>', false);
+    }
+
+    public function test_unread_enquiries_do_not_put_a_count_in_the_admin_title(): void
+    {
+        $admin = $this->makeAdmin();
+        $this->makeMessage();
+        $this->makeMessage();
+
+        $this->actingAs($admin, 'admin')
+            ->get(route('admin.dashboard'))
+            ->assertOk()
+            ->assertSee('<title>DASHBOARD | Balai ti Arjud Admin</title>', false);
     }
 
     public function test_the_tab_title_has_no_count_when_there_is_nothing_unread(): void

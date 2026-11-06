@@ -40,13 +40,18 @@ class BookingWizardTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function html(?\App\Models\User $user = null): string
+    private function html(?\App\Models\User $user = null, ?Service $service = null): string
     {
         // `/book` is behind `auth.customer`, so there is no guest version of this
         // page to assert on. A signed-up customer with no completed appointments
         // is the first-timer case, and that is what a first-timer always is.
+        //
+        // Services are chosen on the Browse Services page now, so `/book` needs a
+        // basket in the query string to render its wizard.
+        $service ??= $this->makeService();
+
         return $this->actingAs($user ?: $this->makeUser())
-            ->get(route('appointments.create'))
+            ->get(route('appointments.create', ['services' => [$service->slug]]))
             ->assertOk()
             ->getContent();
     }
@@ -90,8 +95,10 @@ class BookingWizardTest extends TestCase
      */
     private function bookAndFollow(array $overrides = [], ?\App\Models\User $user = null): string
     {
+        $service = $this->makeService();
+
         $this->actingAs($user ?: $this->makeUser())
-            ->get(route('appointments.create'))
+            ->get(route('appointments.create', ['services' => [$service->slug]]))
             ->assertOk();
 
         return $this->followingRedirects()
@@ -104,39 +111,40 @@ class BookingWizardTest extends TestCase
     /* ------------------------------------------------------------------ */
 
     /**
-     * The four steps are sections of one card.
+     * The three steps are sections of one card.
      *
-     * Asserted as a single `bta-card` wrapping all four headings, and as the
+     * Asserted as a single `bta-card` wrapping all three headings, and as the
      * absence of the `x-ui.card`s the steps used to be. Counting the cards is the
-     * part that matters: a single card around everything, with four headings in
+     * part that matters: a single card around everything, with three headings in
      * it, is the shape this is about, and a regression that put one step back in
-     * its own card would still contain both headings.
+     * its own card would still contain all the headings.
      *
-     * It was seven steps and is four. The three merges are asserted by their
-     * consequence rather than by counting: two cards joined means one heading
-     * carrying both questions, and the terms agreement is no longer a heading at
-     * all because it is no longer a step.
+     * The service picker is not one of them. Services are chosen on the Browse
+     * Services page and arrive in the query string, so `/book` opens on the
+     * customer's own details rather than asking what to book a second time.
      */
-    public function test_all_four_steps_live_in_one_card(): void
+    public function test_all_three_steps_live_in_one_card(): void
     {
         $this->makeService();
 
         $html = $this->html();
 
         foreach ([
-            '1. Selected Service',
-            '2. Your Details &amp; Preferred Date &amp; Time',
-            '3. Preferences &amp; Health Notes',
-            '4. Last Service(s) Availed, Technician &amp; Special Request',
+            '1. Your Details &amp; Preferred Date &amp; Time',
+            '2. Preferences &amp; Health Notes',
+            '3. Last Service(s) Availed, Technician &amp; Special Request',
         ] as $heading) {
             $this->assertStringContainsString($heading, $html);
         }
 
-        // The merged-away headings must not survive as anything: they would mean a
-        // step that still exists somewhere the counter cannot reach.
+        // The retired service-picker heading and the old numbered headings must
+        // not survive anywhere the counter cannot reach.
         foreach ([
+            '1. Selected Service',
             '2. Your Details<',
+            '2. Your Details &amp; Preferred',
             '3. Preferred Date &amp; Time',
+            '4. Last Service(s) Availed<',
             '5. Last Service(s) Availed<',
             '6. Choose Technician &amp; Special Request',
             '7. Terms &amp; Conditions',
@@ -144,9 +152,9 @@ class BookingWizardTest extends TestCase
             $this->assertStringNotContainsString($deadHeading, $html);
         }
 
-        // One card shell holds the four steps, and one other holds the Booking
-        // Summary. That second one is deliberate â€” the summary is not a step, and
-        // it has to stay visible while the steps change â€” so the count that
+        // One card shell holds the three steps, and one other holds the Booking
+        // Summary. That second one is deliberate — the summary is not a step, and
+        // it has to stay visible while the steps change — so the count that
         // matters is "two", not "one".
         //
         // Matched on the class alone rather than on the whole attribute list:
@@ -156,7 +164,7 @@ class BookingWizardTest extends TestCase
         $this->assertSame(
             2,
             substr_count($html, 'class="bta-card'),
-            'The four steps must share one card shell; only the summary keeps its own.'
+            'The three steps must share one card shell; only the summary keeps its own.'
         );
 
         // The steps' card is the one `revealStep()` scrolls, so it has to still
@@ -182,18 +190,19 @@ class BookingWizardTest extends TestCase
 
         $html = $this->html();
 
-        // Four panels, each shown on its own step â€” and no fifth.
-        for ($step = 1; $step <= 4; $step++) {
+        // Three panels, each shown on its own step — and no fourth.
+        for ($step = 1; $step <= 3; $step++) {
             $this->assertStringContainsString('x-show="step === '.$step.'"', $html);
         }
 
-        for ($step = 5; $step <= 7; $step++) {
+        for ($step = 4; $step <= 7; $step++) {
             $this->assertStringNotContainsString('x-show="step === '.$step.'"', $html);
         }
 
         // The counter stays, is driven by the step list rather than a literal, and
         // is announced when it changes.
-        $this->assertStringContainsString('Step <span x-text="step">1</span> of 4', $html);
+        $this->assertStringContainsString('Step <span x-text="step">1</span> of 3', $html);
+        $this->assertStringNotContainsString('of 4', $html);
         $this->assertStringNotContainsString('of 7', $html);
 
         $this->assertStringContainsString('aria-live="polite"', $html);
@@ -207,9 +216,9 @@ class BookingWizardTest extends TestCase
 
         // And the count of steps is one number, sent from PHP rather than typed
         // into the markup as well, so the counter and the panels cannot disagree.
-        // It was 7 and is 4; the merges shortened the form and this is the one
-        // place the new length is written down as a number.
-        $this->assertStringContainsString('"stepCount":4', $html);
+        // It was 7 and is 3; dropping the picker and merging the rest shortened
+        // the form, and this is the one place the new length is written down.
+        $this->assertStringContainsString('"stepCount":3', $html);
     }
 
     /**
@@ -255,7 +264,7 @@ class BookingWizardTest extends TestCase
      * the error belonged to a screen they had already left.
      *
      * The gate is `missingOnCurrentStep()`, and it is asserted as one list rather
-     * than as four separate booleans because that is how it is built: the button's
+     * than as three separate booleans because that is how it is built: the button's
      * `disabled` state and the note underneath both read the same array, so they
      * cannot end up disagreeing about why the button is dead.
      *
@@ -284,8 +293,10 @@ class BookingWizardTest extends TestCase
             'next() must not advance off an incomplete step.',
         );
 
-        // Each required field, by the message that names it.
-        $this->assertStringContainsString('Choose at least one service', $html);
+        // Each required field, by the message that names it. The service is not
+        // one of them here: it was chosen on the Browse Services page and a
+        // request with no valid service never reaches this form.
+        $this->assertStringNotContainsString('Choose at least one service', $html);
         $this->assertStringContainsString('Enter your full name', $html);
         $this->assertStringContainsString('Enter a phone number we can reach you on', $html);
         $this->assertStringContainsString('Choose a preferred date', $html);
@@ -386,104 +397,42 @@ class BookingWizardTest extends TestCase
     }
 
     /* ------------------------------------------------------------------ */
-    /* 2. Step 1 â€” four per category, then See More                        */
+    /* 2. The service picker is gone                                      */
     /* ------------------------------------------------------------------ */
 
     /**
-     * Four services per category, then a toggle.
+     * Services arrive from the Browse Services page, not from a picker here.
      *
-     * The Browse Services page shows four rows per category card and hides the
-     * rest behind "See All". This step does the same thing, so a customer who has
-     * read the price list meets the same shape here instead of a flat grid of
-     * thirty checkboxes.
+     * The old step 1 listed every category with checkboxes, See More toggles and
+     * "Add Selected to Order" — a second, smaller copy of the Services page. It
+     * was also the reason `/book` had a step that could be satisfied only in one
+     * particular way. The query string is now the single source of the basket,
+     * and the selected service is already in the summary when the page renders.
      */
-    public function test_step_one_shows_four_services_per_category_before_a_toggle(): void
+    public function test_the_service_picker_is_gone_and_the_selected_service_is_in_the_summary(): void
     {
-        $this->makeCategory('Manicure & Pedicure', 9);
-        $this->makeCategory('Threading', 2);
+        $service = $this->makeService([
+            'name' => 'Glow Manicure',
+            'category' => 'Manicure & Pedicure',
+            'price' => 'Starts @ 500',
+        ]);
 
-        $html = $this->html();
+        $html = $this->html(null, $service);
 
-        // The long category gets the disclosure, with the hidden count in its
-        // label so the button says what it is going to show.
-        $this->assertStringContainsString('See More (5 more)', $html);
-        $this->assertStringContainsString('See Less', $html);
-
-        // The short one does not: a toggle that reveals nothing is worse than no
-        // toggle.
-        $this->assertSame(1, substr_count($html, 'See More (5 more)'));
-
-        // Both categories are labelled and counted.
-        $this->assertStringContainsString('Manicure &amp; Pedicure', $html);
-        $this->assertStringContainsString('9 services', $html);
-        $this->assertStringContainsString('2 services', $html);
-    }
-
-    /**
-     * A category of exactly four gets no disclosure.
-     *
-     * The boundary, because `> 4` and `>= 4` both pass the nine-service case and
-     * only one of them is right.
-     */
-    public function test_a_category_of_exactly_four_gets_no_toggle(): void
-    {
-        $this->makeCategory('Threading', 4);
-
-        $html = $this->html();
-
+        // None of the picker's markup survives: no rows, no toggles, no basket
+        // action, no category disclosure state.
+        $this->assertStringNotContainsString('1. Selected Service', $html);
+        $this->assertStringNotContainsString('x-on:change="toggle(', $html);
+        $this->assertStringNotContainsString('Add Selected to Order', $html);
         $this->assertStringNotContainsString('See More', $html);
-        $this->assertStringNotContainsString('See Less', $html);
-    }
+        $this->assertStringNotContainsString('expandedCategories', $html);
+        $this->assertStringNotContainsString('isCategoryExpanded', $html);
 
-    /**
-     * An opened category stays open.
-     *
-     * This is the whole point of step 1's disclosure state. It used to live in a
-     * per-category Alpine scope holding a bare boolean, which is right for the
-     * Browse Services cards â€” where a category card is the whole page â€” and wrong
-     * here, because this list re-renders around it: ticking a service redraws the
-     * basket in the summary, and every step change flips panel visibility. Either
-     * one re-initialises nested scopes, the boolean goes back to false, and a
-     * category the customer had opened silently collapsed.
-     *
-     * So the state is on the form's own scope, keyed by category.
-     */
-    public function test_an_opened_category_is_keyed_on_the_form_not_a_local_scope(): void
-    {
-        $this->makeCategory('Threading', 7);
-
-        $html = $this->html();
-
-        // Keyed state on the parent form, and the read/write pair that uses it.
-        $this->assertStringContainsString('expandedCategories: {}', $html);
-        $this->assertStringContainsString('isCategoryExpanded(key)', $html);
-        $this->assertStringContainsString('toggleCategory(key)', $html);
-
-        // The rows and the button both ask that key, not a bare `expanded`.
-        $this->assertStringContainsString('x-show="isCategoryExpanded(\'threading\')"', $html);
-        $this->assertStringContainsString('x-on:click="toggleCategory(\'threading\')"', $html);
-
-        // And the old per-category scope is gone â€” it was the thing that reset.
-        $this->assertStringNotContainsString('x-data="serviceCategory()"', $html);
-        $this->assertStringNotContainsString('x-show="expanded"', $html);
-    }
-
-    /**
-     * Two categories, two independent keys.
-     *
-     * A single shared boolean would pass the test above and still be wrong:
-     * opening Manicure would close Threading. Asserted on the two slugs being two
-     * distinct keys in the markup.
-     */
-    public function test_each_category_has_its_own_key(): void
-    {
-        $this->makeCategory('Manicure & Pedicure', 6);
-        $this->makeCategory('Threading', 7);
-
-        $html = $this->html();
-
-        $this->assertStringContainsString('isCategoryExpanded(\'manicure-pedicure\')', $html);
-        $this->assertStringContainsString('isCategoryExpanded(\'threading\')', $html);
+        // The chosen service is still what the page is booking, and its price
+        // formatting arrives with it.
+        $this->assertStringContainsString('Booking Summary', $html);
+        $this->assertStringContainsString('Glow Manicure', $html);
+        $this->assertStringContainsString('Starts @', $html);
     }
 
     /* ------------------------------------------------------------------ */
@@ -759,7 +708,7 @@ class BookingWizardTest extends TestCase
  * missing heading and not a wrong step count — it is a form that silently stops
  * asking for something.
  *
- * So this slices the rendered page into its four panels and checks membership
+ * So this slices the rendered page into its three panels and checks membership
  * directly, rather than trusting the headings.
  */
 public function test_every_field_sits_on_the_step_it_belongs_to(): void
@@ -772,44 +721,37 @@ public function test_every_field_sits_on_the_step_it_belongs_to(): void
 
     $panels = $this->stepPanels($this->html());
 
-    $this->assertSame([1, 2, 3, 4], array_keys($panels), 'The form must still be four panels.');
+    $this->assertSame([1, 2, 3], array_keys($panels), 'The form must still be three panels.');
 
-    // Step 1 keeps the service picker to itself. The rows are an
-    // `x-salon.service-choice` component, so what identifies them is the binding
-    // the component writes — `toggle()` and the shared `selectedIds` state.
-    $this->assertStringContainsString('x-on:change="toggle(', $panels[1]);
-    $this->assertStringContainsString('x-model="selectedIds"', $panels[1]);
-    $this->assertStringNotContainsString('customer_name', $panels[1]);
-
-    // Step 2 is the merge of the old steps 2 and 3: who you are, and when.
+    // Step 1 is who you are and when; the service was already chosen.
     foreach (['customer_name', 'customer_phone', 'preferred_date', 'preferred_time'] as $field) {
         $this->assertStringContainsString(
             'name="'.$field.'"',
-            $panels[2],
-            "The {$field} field must be on step 2, with the rest of the booking's own details.",
+            $panels[1],
+            "The {$field} field must be on step 1, with the rest of the booking's own details.",
         );
     }
 
     // And the date picker itself is on that same panel, not floating outside it.
-    $this->assertStringContainsString('datePickerAnchor', $panels[2]);
+    $this->assertStringContainsString('datePickerAnchor', $panels[1]);
 
-    // Step 3 is the free-text box, and only the free-text box.
-    $this->assertStringContainsString('name="allergies_other"', $panels[3]);
-    $this->assertStringNotContainsString('allergy_preference', $panels[3]);
+    // Step 2 is the free-text box, and only the free-text box.
+    $this->assertStringContainsString('name="allergies_other"', $panels[2]);
+    $this->assertStringNotContainsString('allergy_preference', $panels[2]);
 
-    // Step 4 is the merge of the old steps 5, 6 and 7.
+    // Step 3 is the merge of the old steps 5, 6 and 7.
     foreach (['last_services_availed_note', 'technician_id', 'special_request', 'agree_terms'] as $field) {
         $this->assertStringContainsString(
             'name="'.$field.'"',
-            $panels[4],
+            $panels[3],
             "The {$field} field must be on the last step.",
         );
     }
 
     // And nothing spilled onto a step that should not carry it.
-    $this->assertStringNotContainsString('preferred_time', $panels[3]);
-    $this->assertStringNotContainsString('allergies_other', $panels[4]);
-    $this->assertStringNotContainsString('agree_terms', $panels[3]);
+    $this->assertStringNotContainsString('preferred_time', $panels[2]);
+    $this->assertStringNotContainsString('allergies_other', $panels[3]);
+    $this->assertStringNotContainsString('agree_terms', $panels[2]);
 }
 
 /**
@@ -949,7 +891,7 @@ private function stepPanels(string $html): array
      * The agreement is a field on the last step, not a step of its own.
      *
      * It used to be step 7: a card whose entire content was one checkbox. It is
-     * now the last thing on step 4, above the Confirm Booking button in the
+     * now the last thing on step 3, above the Confirm Booking button in the
      * footer, so reading order and intent agree — agree, then book.
      *
      * Two things have to hold. The control is still on the last panel, and the
@@ -975,9 +917,9 @@ private function stepPanels(string $html): array
         $this->assertStringContainsString('name="agree_terms"', $html);
         $this->assertStringContainsString('terms-modal', $html);
 
-        // It is on the last panel, and the last panel is step 4.
+        // It is on the last panel, and the last panel is step 3.
         $this->assertMatchesRegularExpression(
-            '/x-show="step === 4".*name="agree_terms"/s',
+            '/x-show="step === 3".*name="agree_terms"/s',
             $html,
             'The agreement must sit inside the final step, not after it.'
         );
@@ -1184,7 +1126,7 @@ private function stepPanels(string $html): array
         $html = $this->bookAndFollow(['agree_terms' => null]);
 
         $this->assertStringContainsString(
-            '"startStep":4',
+            '"startStep":3',
             $html,
             'A refusal about the agreement must open the panel holding the agreement.',
         );
@@ -1266,7 +1208,7 @@ private function stepPanels(string $html): array
      * The other half of the fix, and the one that would be easy to break while
      * fixing the first: a clean error bag must send 1 rather than "the last step
      * that has ever had an error" or anything else sticky. A customer arriving at
-     * `/book` for the first time is shown the service list.
+     * `/book` for the first time is shown their details.
      */
     public function test_an_unsubmitted_form_still_opens_on_the_first_step(): void
     {
@@ -1285,15 +1227,15 @@ private function stepPanels(string $html): array
      * The refusal opens the first thing that has to be put right.
      *
      * Earliest, not last and not first-in-the-toast-by-accident: a customer who
-     * sent no name at all is sent to step 2, and a customer who sent a name but no
-     * agreement is sent to step 4. Both are asserted through the real request, so
+     * sent no name at all is sent to step 1, and a customer who sent a name but no
+     * agreement is sent to step 3. Both are asserted through the real request, so
      * the ordering comes from what `StoreBookingRequest` actually refuses on
      * rather than from a list written out here.
      *
      * A step with no error of its own is not a candidate. The health note is the
-     * one field on step 3, it is optional, and refusing a booking for it can only
+     * one field on step 2, it is optional, and refusing a booking for it can only
      * happen over a length — which is asserted here so the map's claim to cover
-     * step 3 is a tested one rather than a hopeful one.
+     * step 2 is a tested one rather than a hopeful one.
      */
     public function test_the_refusal_opens_the_earliest_step_with_something_to_fix(): void
     {
@@ -1301,19 +1243,19 @@ private function stepPanels(string $html): array
         $this->makeService();
 
         // Both ends of the wizard at once, and the answer is the earlier one.
-        $this->assertStringContainsString('"startStep":2', $this->bookAndFollow([
+        $this->assertStringContainsString('"startStep":1', $this->bookAndFollow([
             'customer_name' => '',
             'agree_terms' => null,
         ]));
 
         // Nothing wrong on step 1, wrong only on the last: the last one.
-        $this->assertStringContainsString('"startStep":4', $this->bookAndFollow([
+        $this->assertStringContainsString('"startStep":3', $this->bookAndFollow([
             'agree_terms' => null,
             'last_services_availed_note' => null,
         ]));
 
-        // Step 3's one field, refused for length.
-        $this->assertStringContainsString('"startStep":3', $this->bookAndFollow([
+        // Step 2's one field, refused for length.
+        $this->assertStringContainsString('"startStep":2', $this->bookAndFollow([
             'allergies_other' => str_repeat('a', 2001),
         ]));
 
@@ -1337,7 +1279,7 @@ private function stepPanels(string $html): array
         $this->assertSame(1, BookingSteps::stepForField('services'));
         $this->assertSame(1, BookingSteps::stepForField('services.0.service_id'));
         $this->assertSame(1, BookingSteps::stepForField('services.9.quantity'));
-        $this->assertSame(4, BookingSteps::stepForField('special_request'));
+        $this->assertSame(3, BookingSteps::stepForField('special_request'));
         $this->assertNull(BookingSteps::stepForField('special_request_notes'));
         $this->assertNull(BookingSteps::stepForField('_token'));
     }

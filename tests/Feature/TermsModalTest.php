@@ -47,7 +47,7 @@ class TermsModalTest extends TestCase
     {
         $customer = $this->makeUser();
 
-        foreach (['/', route('appointments.create'), route('appointments.index')] as $url) {
+        foreach (['/', $this->bookingUrl(), route('appointments.index')] as $url) {
             $html = $this->actingAs($customer)->get($url)->assertOk()->getContent();
 
             $this->assertStringContainsString('termsModal(', $html, "The dialog is missing on {$url}.");
@@ -149,7 +149,7 @@ class TermsModalTest extends TestCase
 
     public function test_the_agreement_checkboxes_open_the_dialog_instead_of_leaving_the_page(): void
     {
-        $html = $this->actingAs($this->makeUser())->get(route('appointments.create'))->assertOk()->getContent();
+        $html = $this->actingAs($this->makeUser())->get($this->bookingUrl())->assertOk()->getContent();
 
         // All three policies, all opening the dialog.
         foreach (['booking', 'cancellation', 'rescheduling'] as $category) {
@@ -285,7 +285,7 @@ public function test_the_admin_terms_page_has_no_preview_trigger_and_mounts_no_d
 
     public function test_every_trigger_still_hrefs_the_standalone_page(): void
     {
-        $html = $this->actingAs($this->makeUser())->get(route('appointments.create'))->assertOk()->getContent();
+        $html = $this->actingAs($this->makeUser())->get($this->bookingUrl())->assertOk()->getContent();
 
         // The trigger is a real link that Alpine intercepts, so without the
         // bundle the browser follows it and the terms are still readable.
@@ -349,7 +349,7 @@ public function test_the_admin_terms_page_has_no_preview_trigger_and_mounts_no_d
 
         // And a trigger still leads there, so a customer who asks gets an answer
         // instead of a dead click.
-        $booking = $this->actingAs($this->makeUser())->get(route('appointments.create'))->assertOk()->getContent();
+        $booking = $this->actingAs($this->makeUser())->get($this->bookingUrl())->assertOk()->getContent();
 
         $this->assertStringContainsString("\$dispatch('terms-modal', { category: 'booking' })", $booking);
     }

@@ -447,7 +447,7 @@ class ServicePriceFormatsTest extends TestCase
         $this->assertSame('500.00', (string) AppointmentService::sole()->price);
     }
 
-    public function test_the_booking_form_marks_a_service_with_nothing_to_charge_as_price_on_request(): void
+    public function test_a_service_with_nothing_to_charge_cannot_enter_the_booking_form(): void
     {
         $this->actingAs($this->makeUser());
         $this->makeSalonSettings();
@@ -455,10 +455,17 @@ class ServicePriceFormatsTest extends TestCase
         $this->makeService(['name' => 'Priced', 'slug' => 'priced', 'price' => '799']);
         $this->makeService(['name' => 'Unpriced', 'slug' => 'unpriced', 'price' => 'ask in store']);
 
-        $html = $this->get('/book')->assertOk()->getContent();
+        // Services are chosen on the Browse Services page now, so an unpriced
+        // slug in the query string is refused at the door rather than rendered as
+        // a row the customer can tick and then cannot book.
+        $this->get('/book?services[]=unpriced')
+            ->assertRedirect(route('services.index').'#services')
+            ->assertSessionHas('toast');
 
-        $this->assertStringContainsString('price on request', $html);
-        $this->assertStringContainsString('Confirm the price with the salon', $html);
+        $html = $this->get('/book?services[]=priced')->assertOk()->getContent();
+
+        $this->assertStringContainsString('Priced', $html);
+        $this->assertStringNotContainsString('price on request', $html);
     }
 
     public function test_a_variant_with_nothing_to_charge_is_left_out_of_the_booking_form(): void
@@ -470,7 +477,7 @@ class ServicePriceFormatsTest extends TestCase
         $service->variants()->create(['name' => 'Short Hair', 'price' => '500']);
         $service->variants()->create(['name' => 'Unpriced Length', 'price' => 'ask in store']);
 
-        $html = $this->get('/book')->assertOk()->getContent();
+        $html = $this->get('/book?services[]='.$service->slug)->assertOk()->getContent();
 
         $this->assertStringContainsString('Short Hair', $html);
         $this->assertStringNotContainsString('Unpriced Length', $html);

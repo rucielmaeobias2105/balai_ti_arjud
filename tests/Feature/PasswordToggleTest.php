@@ -8,9 +8,9 @@ use Tests\TestCase;
 /**
  * The password show/hide toggle, on every screen that has one.
  *
- * The requirement was that it works in four places: the admin login, the
- * customer login, and the password fields on both profile screens. It worked in
- * none of them, and for one reason — see `test_the_selector_matches_the_markup`
+ * The requirement was that it works in four places: the unified login (which
+ * replaced the separate admin login), the register form, and the password fields
+ * on both profile screens. It worked in none of them, and for one reason — see `test_the_selector_matches_the_markup`
  * below, which is the test that matters here. The rest assert that each location
  * is actually wired, because "the helper works" and "this form has a toggle" are
  * different claims and only the second one is what a user experiences.
@@ -100,7 +100,6 @@ class PasswordToggleTest extends TestCase
     public static function locations(): array
     {
         return [
-            'admin login' => ['/admin/login'],
             'customer login' => ['/login'],
             'customer register' => ['/register'],
             'admin reset password' => ['/admin/password/reset/abc?email=admin@example.test'],
@@ -225,7 +224,7 @@ class PasswordToggleTest extends TestCase
         // names one icon rather than two.
         $this->assertStringContainsString("'-slash'", $component);
 
-        $html = $this->get('/admin/login')->assertOk()->getContent();
+        $html = $this->get('/login')->assertOk()->getContent();
 
         $this->assertStringContainsString('data-password-eye-open', $html);
         $this->assertStringContainsString('data-password-eye-closed', $html);
@@ -261,7 +260,7 @@ class PasswordToggleTest extends TestCase
      */
     public function test_the_toggle_announces_its_state(): void
     {
-        $html = $this->get('/admin/login')->assertOk()->getContent();
+        $html = $this->get('/login')->assertOk()->getContent();
 
         $this->assertStringContainsString('aria-pressed="false"', $html);
         $this->assertStringContainsString("button.setAttribute('aria-pressed', String(!revealed))", $this->source());

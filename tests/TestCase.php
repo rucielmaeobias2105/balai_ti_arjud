@@ -60,6 +60,24 @@ abstract class TestCase extends BaseTestCase
      * advertised price and the charge to differ passes both; a test that wants
      * an unbookable service passes `'base_price' => null`.
      */
+    /**
+     * A `/book` URL with a bookable service in the query string.
+     *
+     * Services are chosen on the Browse Services page now. A bare `/book` opens
+     * no form and redirects back to the catalogue, so tests that need the wizard
+     * to render pass a basket the same way the real "Proceed to Checkout" button
+     * does.
+     */
+    protected function bookingUrl(?Service $service = null): string
+    {
+        $service ??= Service::query()
+            ->where('is_active', true)
+            ->whereNotNull('base_price')
+            ->first() ?? $this->makeService();
+
+        return route('appointments.create', ['services' => [$service->slug]]);
+    }
+
     protected function makeService(array $attributes = []): Service
     {
         static::$sequence++;

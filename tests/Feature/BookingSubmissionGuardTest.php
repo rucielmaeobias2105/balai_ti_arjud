@@ -51,7 +51,7 @@ class BookingSubmissionGuardTest extends TestCase
     public function test_the_booking_form_carries_a_fresh_idempotency_key(): void
     {
         $html = $this->actingAs($this->makeUser())
-            ->get('/book')
+            ->get($this->bookingUrl())
             ->assertOk()
             ->getContent();
 
@@ -73,7 +73,7 @@ class BookingSubmissionGuardTest extends TestCase
         $key = (string) Str::uuid();
 
         $this->actingAs($user)
-            ->from(route('appointments.create'))
+            ->from($this->bookingUrl())
             ->post(route('appointments.store'), $this->payload($service, [
                 'agree_terms' => null,
                 'idempotency_key' => $key,
@@ -84,7 +84,7 @@ class BookingSubmissionGuardTest extends TestCase
         // attempt as far as the guard is concerned. Harmless while nothing was
         // created — but it would stop being harmless the moment a submit could
         // fail after its appointment was written.
-        $html = $this->actingAs($user)->get('/book')->assertOk()->getContent();
+        $html = $this->actingAs($user)->get($this->bookingUrl())->assertOk()->getContent();
 
         $this->assertStringContainsString('name="idempotency_key" value="'.$key.'"', $html);
     }
@@ -95,7 +95,7 @@ class BookingSubmissionGuardTest extends TestCase
         // still books — it just relies on the throttle instead of the key, and
         // failing it would break any client that has not been taught the field.
         $this->actingAs($this->makeUser())
-            ->from(route('appointments.create'))
+            ->from($this->bookingUrl())
             ->post(route('appointments.store'), $this->payload($this->makeService()))
             ->assertSessionHasNoErrors();
 
@@ -109,7 +109,7 @@ class BookingSubmissionGuardTest extends TestCase
         // arbitrary text there could aim a collision at somebody else's key, so
         // anything that is not a UUID is dropped and the booking proceeds.
         $this->actingAs($this->makeUser())
-            ->from(route('appointments.create'))
+            ->from($this->bookingUrl())
             ->post(route('appointments.store'), $this->payload($this->makeService(), [
                 'idempotency_key' => 'not-a-uuid',
             ]))
@@ -135,7 +135,7 @@ class BookingSubmissionGuardTest extends TestCase
 
         // First tap.
         $this->actingAs($user)
-            ->from(route('appointments.create'))
+            ->from($this->bookingUrl())
             ->post(route('appointments.store'), $payload)
             ->assertSessionHasNoErrors();
 
@@ -145,7 +145,7 @@ class BookingSubmissionGuardTest extends TestCase
         // Second tap, same key — the customer pressed the button twice, or the
         // browser resent it.
         $this->actingAs($user)
-            ->from(route('appointments.create'))
+            ->from($this->bookingUrl())
             ->post(route('appointments.store'), $payload)
             ->assertSessionHasNoErrors();
 
@@ -167,7 +167,7 @@ class BookingSubmissionGuardTest extends TestCase
         $first = Appointment::sole();
 
         $response = $this->actingAs($user)
-            ->from(route('appointments.create'))
+            ->from($this->bookingUrl())
             ->post(route('appointments.store'), $payload);
 
         // The same redirect, the same reference, the same wording. A customer who
@@ -241,7 +241,7 @@ class BookingSubmissionGuardTest extends TestCase
         // user_id, so this finds nothing and books normally — two bookings, two
         // customers, and nobody handed back a stranger's reference number.
         $this->actingAs($mine)
-            ->from(route('appointments.create'))
+            ->from($this->bookingUrl())
             ->post(route('appointments.store'), $this->payload($service, [
                 'preferred_date' => $this->bookableDate(2),
                 'idempotency_key' => $key,
@@ -398,7 +398,7 @@ class BookingSubmissionGuardTest extends TestCase
      */
     public function test_the_confirm_button_disables_once_the_form_is_sent(): void
     {
-        $html = $this->actingAs($this->makeUser())->get('/book')->assertOk()->getContent();
+        $html = $this->actingAs($this->makeUser())->get($this->bookingUrl())->assertOk()->getContent();
 
         // Driven off the form's `submit` event rather than a click handler, so an
         // Enter keypress and a browser's own resubmit-on-Back are covered too.

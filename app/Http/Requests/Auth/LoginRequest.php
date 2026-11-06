@@ -18,6 +18,7 @@ class LoginRequest extends FormRequest
     {
         return [
             'login' => ['required', 'string', 'max:255'],
+            'username' => ['nullable', 'string', 'max:255'],
             'password' => ['required', 'string'],
             'remember' => ['nullable', 'boolean'],
         ];
@@ -35,8 +36,12 @@ class LoginRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        if ($this->filled('login')) {
-            $this->merge(['login' => strtolower(trim((string) $this->input('login')))]);
+        $raw = $this->filled('login')
+            ? (string) $this->input('login')
+            : (string) $this->input('username', '');
+
+        if (trim($raw) !== '') {
+            $this->merge(['login' => strtolower(trim($raw))]);
         }
     }
 }

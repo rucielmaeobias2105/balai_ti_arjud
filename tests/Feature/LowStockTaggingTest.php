@@ -170,7 +170,7 @@ class LowStockTaggingTest extends TestCase
 
     public function test_guests_cannot_reach_the_tagging_screen(): void
     {
-        $this->get(route('admin.tags.index'))->assertRedirect(route('admin.login'));
+        $this->get(route('admin.tags.index'))->assertRedirect(route('login'));
     }
 
     /* ------------------------------------------------------------------ */

@@ -3,7 +3,6 @@
 
 use App\Http\Controllers\Admin\AppointmentController as AdminAppointmentController;
 use App\Http\Controllers\Admin\Auth\AdminPasswordResetLinkController;
-use App\Http\Controllers\Admin\Auth\AdminSessionController;
 use App\Http\Controllers\Admin\CalendarController;
 use App\Http\Controllers\Admin\CatalogController;
 use App\Http\Controllers\Admin\ContactMessageController;
@@ -73,11 +72,8 @@ Route::middleware('guest')->group(function () {
     Route::get('/register', [RegisteredUserController::class, 'create'])->name('register');
     Route::post('/register', [RegisteredUserController::class, 'store'])->name('register.store');
 
-    // Customer Flow 2 — Login
+    // Customer Flow 2 — Login form. Both roles use this one screen.
     Route::get('/login', [AuthenticatedSessionController::class, 'create'])->name('login');
-    Route::post('/login', [AuthenticatedSessionController::class, 'store'])
-        ->middleware('throttle:10,1')
-        ->name('login.store');
 
     // Customer Flow 3 — Forgot Password (4-step wizard)
     Route::prefix('password')->name('password.')->group(function () {
@@ -89,6 +85,19 @@ Route::middleware('guest')->group(function () {
         Route::post('/reset', [PasswordResetLinkController::class, 'update'])->name('update');
     });
 });
+
+/*
+ * Login submission deliberately sits *outside* the `guest` group.
+ *
+ * The two guards share one session cookie, and the controller logs the other
+ * guard out before signing this one in. Being behind `guest` would block that
+ * switch — a signed-in customer could never sign into an admin account (or vice
+ * versa) without logging out first — which is exactly the one-active-role flow
+ * this controller exists to support.
+ */
+Route::post('/login', [AuthenticatedSessionController::class, 'store'])
+    ->middleware('throttle:10,1')
+    ->name('login.store');
 
 Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])
     ->middleware('auth')
@@ -271,12 +280,18 @@ Route::get('/book/slots', [AppointmentController::class, 'slots'])
 */
 
 Route::prefix('admin')->name('admin.')->group(function () {
-    // Admin Flow 1 — Admin Login
+    /*
+     * Admin Flow 1 — there is no separate staff login any more.
+     *
+     * `/login` is the single form for both roles, and AuthenticatedSessionController
+     * decides where to send the account after checking its credentials. This
+     * legacy URL is kept as a 302 so old bookmarks, emails and the customer
+     * footer's staff link keep working without duplicating the form, controller
+     * or route.
+     */
     Route::middleware('admin.guest')->group(function () {
-        Route::get('/login', [AdminSessionController::class, 'create'])->name('login');
-        Route::post('/login', [AdminSessionController::class, 'store'])
-            ->middleware('throttle:10,1')
-            ->name('login.store');
+        Route::get('/login', fn () => redirect()->route('login'))->name('login');
+        Route::post('/login', fn () => redirect()->route('login'))->name('login.store');
 
         /*
          * Password recovery, on Laravel's broker rather than the customer's
@@ -305,7 +320,7 @@ Route::prefix('admin')->name('admin.')->group(function () {
         });
     });
 
-    Route::post('/logout', [AdminSessionController::class, 'destroy'])
+    Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])
         ->middleware('auth.admin')
         ->name('logout');
 

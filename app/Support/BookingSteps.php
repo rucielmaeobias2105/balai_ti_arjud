@@ -6,21 +6,21 @@ use Illuminate\Contracts\Support\MessageBag;
 use Illuminate\Support\ViewErrorBag;
 
 /**
- * The four steps of the booking wizard, and where a refused submission lands.
+ * The three steps of the booking wizard, and where a refused submission lands.
  *
- * The wizard is four panels inside one card, moved by Back and Continue, and it
+ * The wizard is three panels inside one card, moved by Back and Continue, and it
  * is a server-rendered page: pressing Confirm Booking posts the form, and a
  * refused booking comes back as a fresh render. Which panel that fresh render
  * opens on is therefore not a detail the customer can lose track of — the page
  * genuinely comes back on step 1 unless something says otherwise.
  *
- * That was the bug: tick everything, reach step 4, press Confirm without ticking
- * the agreement, and "You must agree to the Terms and Conditions to book."
- * arrived in the toast while the panel holding the checkbox was three steps away
- * and invisible. Nothing had gone wrong and nothing was lost — but the customer
- * was told about a box they could not see, on a form they had just filled in,
- * with no way back to it except three Continue clicks that read as navigation
- * they had to do again.
+ * That was the bug: tick everything, reach the last step, press Confirm without
+ * ticking the agreement, and "You must agree to the Terms and Conditions to
+ * book." arrived in the toast while the panel holding the checkbox was steps
+ * away and invisible. Nothing had gone wrong and nothing was lost — but the
+ * customer was told about a box they could not see, on a form they had just
+ * filled in, with no way back to it except Continue clicks that read as
+ * navigation they had to do again.
  *
  * So the step is decided here, from the error bag, and sent to the wizard as the
  * step to open on. Three properties of the answer, all of them the point:
@@ -30,7 +30,7 @@ use Illuminate\Support\ViewErrorBag;
  *     errors in the order `StoreBookingRequest::rules()` declares them, which is
  *     step order, so this is also the panel the toast opens on;
  *   - it is a step, never a new step. Every error bag is mapped onto one of the
- *     four panels rather than inventing a place to put the message;
+ *     three panels rather than inventing a place to put the message;
  *   - it is 1 when there is nothing to report, so a fresh, untouched form opens
  *     where it always has.
  *
@@ -57,43 +57,42 @@ final class BookingSteps
      * The step titles, in order.
      *
      * Keyed by step number rather than a plain list because the number is what
-     * the wizard's panels compare themselves against (`x-show="step === 4"`), and
+     * the wizard's panels compare themselves against (`x-show="step === 3"`), and
      * what `startStep()` returns. A list would make every caller count to get it
      * back.
      *
      * `count()` is what the "Step X of N" counter, the Continue button's
-     * visibility and the last step's submit button all read, so the four places
-     * that need the length cannot disagree about it.
+     * visibility and the last step's submit button all read, so every place that
+     * needs the length cannot disagree about it.
      *
      * The headings themselves are written into the panels, where they are read.
      * This is the list they are kept in step with.
      */
     public const TITLES = [
-        1 => 'Selected Service',
-        2 => 'Your Details & Preferred Date & Time',
-        3 => 'Preferences & Health Notes',
-        4 => 'Last Service(s) Availed, Technician & Special Request',
+        1 => 'Your Details & Preferred Date & Time',
+        2 => 'Preferences & Health Notes',
+        3 => 'Last Service(s) Availed, Technician & Special Request',
     ];
 
     /**
      * Which step owns which field.
      *
-     * `services` covers `services.0.service_id` and the rest: a rule on one line
-     * of the basket is a rule about choosing a service, so it belongs to the panel
-     * the basket is on. Likewise `last_services_availed_note` is the visible half
-     * of the question and `last_services_availed` the hidden one, and both are
-     * answered on the same step.
+     * `services` covers `services.0.service_id` and the rest. There is no
+     * service-picker panel any more — services are chosen before `/book` — but a
+     * refused line still belongs to the first panel, beside the Booking Summary
+     * that shows the basket. Likewise `last_services_availed_note` is the visible
+     * half of the question and `last_services_availed` the hidden one, and both
+     * are answered on the same step.
      *
-     * Step 3 is in here even though nothing on it can fail. `allergies_other` is
+     * Step 2 is in here even though nothing on it can fail. `allergies_other` is
      * nullable and bounded only by `max`, and a string that is too long is still a
      * health note rather than a question about anything else — but listing it
      * means a future rule cannot fail on a step this map claims does not exist.
      */
     public const STEP_FIELDS = [
-        1 => ['services'],
-        2 => ['customer_name', 'customer_phone', 'preferred_date', 'preferred_time'],
-        3 => ['allergies_other'],
-        4 => [
+        1 => ['services', 'customer_name', 'customer_phone', 'preferred_date', 'preferred_time'],
+        2 => ['allergies_other'],
+        3 => [
             'last_services_availed',
             'last_services_availed_note',
             'technician_id',

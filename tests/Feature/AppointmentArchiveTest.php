@@ -668,11 +668,11 @@ public function test_an_archived_booking_leaves_the_working_list(): void
 
         $this->actingAs($customer)
             ->post(route('admin.appointments.archive', $appointment))
-            ->assertRedirect(route('admin.login'));
+            ->assertRedirect(route('login'));
 
         $this->actingAs($customer)
             ->delete(route('admin.appointments.destroy', $appointment))
-            ->assertRedirect(route('admin.login'));
+            ->assertRedirect(route('login'));
 
         $this->assertNull($appointment->fresh()->archived_at);
         $this->assertDatabaseHas('appointments', ['id' => $appointment->id, 'deleted_at' => null]);
@@ -680,6 +680,6 @@ public function test_an_archived_booking_leaves_the_working_list(): void
 
     public function test_a_guest_cannot_reach_the_archived_view(): void
     {
-        $this->get(route('admin.appointments.archived'))->assertRedirect(route('admin.login'));
+        $this->get(route('admin.appointments.archived'))->assertRedirect(route('login'));
     }
 }

@@ -25,7 +25,7 @@ class AuthenticateAdmin
             // guard, which uses the same session cookie.
             IntendedUrl::remember($request, 'admin');
 
-            return redirect()->guest(route('admin.login'));
+            return redirect()->guest(route('login'));
         }
 
         if (! $admin->is_active) {
@@ -33,7 +33,7 @@ class AuthenticateAdmin
             $request->session()->invalidate();
             $request->session()->regenerateToken();
 
-            return redirect()->route('admin.login')
+            return redirect()->route('login')
                 ->withErrors(['email' => 'This admin account has been deactivated.']);
         }
 

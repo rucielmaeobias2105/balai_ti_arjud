@@ -48,7 +48,8 @@
      * base_price, so the first priceable one is also the lowest.
      */
     $from = $service->variants->firstWhere(fn ($v) => $v->base_price !== null);
-    $bookable = $from !== null || $service->base_price !== null;
+    $unavailable = $service->isUnavailable();
+    $bookable = ! $unavailable && ($from !== null || $service->base_price !== null);
     $fromPrice = $from?->price ?? $service->price;
 
     /*

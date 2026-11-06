@@ -30,7 +30,6 @@ class TabTitleTest extends TestCase
             '/login' => 'LOG IN | Balai ti Arjud',
             '/register' => 'REGISTER | Balai ti Arjud',
             '/password' => 'FORGOT PASSWORD | Balai ti Arjud',
-            '/admin/login' => 'ADMIN SIGN IN | Balai ti Arjud',
         ];
 
         foreach ($sections as $uri => $expected) {

@@ -248,7 +248,7 @@ class BlockedSlotsTest extends TestCase
     public function test_the_customer_booking_calendar_dates_are_not_faded_out(): void
     {
         $html = $this->actingAs($this->makeUser())
-            ->get(route('appointments.create'))
+            ->get($this->bookingUrl())
             ->assertOk()
             ->getContent();
 
@@ -458,7 +458,7 @@ class BlockedSlotsTest extends TestCase
 
     public function test_a_customer_cannot_reach_the_calendar(): void
     {
-        $this->get('/admin/calendar')->assertRedirect(route('admin.login'));
+        $this->get('/admin/calendar')->assertRedirect(route('login'));
 
         $this->actingAs($this->makeUser())
             ->post(route('admin.calendar.store'), [
@@ -591,7 +591,7 @@ class BlockedSlotsTest extends TestCase
         BlockedSlot::create(['date' => $date, 'reason' => 'Public holiday']);
 
         $response = $this->actingAs($user)
-            ->from(route('appointments.create'))
+            ->from($this->bookingUrl())
             ->post(route('appointments.store'), $this->bookingPayload($service, $date, '10:00'));
 
         $response->assertSessionHasErrors('preferred_date');
@@ -610,7 +610,7 @@ class BlockedSlotsTest extends TestCase
         BlockedSlot::create(['date' => $date, 'start_time' => '10:00', 'end_time' => '12:00']);
 
         $response = $this->actingAs($user)
-            ->from(route('appointments.create'))
+            ->from($this->bookingUrl())
             ->post(route('appointments.store'), $this->bookingPayload($service, $date, '11:00'));
 
         $response->assertSessionHasErrors('preferred_time');
@@ -635,13 +635,13 @@ class BlockedSlotsTest extends TestCase
         $date = $this->bookableDate();
 
         // The page renders while the slot is genuinely free.
-        $this->actingAs($user)->get('/book')->assertOk()->assertSee('11:00', false);
+        $this->actingAs($user)->get($this->bookingUrl())->assertOk()->assertSee('11:00', false);
 
         // Then an admin closes that window.
         BlockedSlot::create(['date' => $date, 'start_time' => '10:00', 'end_time' => '12:00']);
 
         $this->actingAs($user)
-            ->from(route('appointments.create'))
+            ->from($this->bookingUrl())
             ->post(route('appointments.store'), $this->bookingPayload($service, $date, '11:00'))
             ->assertSessionHasErrors('preferred_time');
 
@@ -977,7 +977,7 @@ class BlockedSlotsTest extends TestCase
         $date = $this->bookableDate();
 
         $this->actingAs($user)
-            ->from(route('appointments.create'))
+            ->from($this->bookingUrl())
             ->post(route('appointments.store'), $this->bookingPayload($service, $date, '10:00'))
             ->assertSessionHasNoErrors();
 
@@ -999,7 +999,7 @@ class BlockedSlotsTest extends TestCase
         );
 
         $this->actingAs($this->makeUser())
-            ->from(route('appointments.create'))
+            ->from($this->bookingUrl())
             ->post(route('appointments.store'), $this->bookingPayload($this->makeService(), $sunday->toDateString(), '10:00'))
             ->assertSessionHasErrors('preferred_date');
 
@@ -1052,7 +1052,7 @@ class BlockedSlotsTest extends TestCase
         );
 
         $this->actingAs($this->makeUser())
-            ->from(route('appointments.create'))
+            ->from($this->bookingUrl())
             ->post(route('appointments.store'), $this->bookingPayload($this->makeService(), $monday->toDateString(), '10:00'))
             ->assertSessionHasErrors('preferred_date');
 
@@ -1129,7 +1129,7 @@ class BlockedSlotsTest extends TestCase
     private function renderBookingForm(): string
     {
         return $this->lastBookingHtml = $this->actingAs($this->makeUser())
-            ->get('/book')
+            ->get($this->bookingUrl())
             ->assertOk()
             ->getContent();
     }

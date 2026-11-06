@@ -104,7 +104,7 @@
                 &copy; {{ now()->year }} {{ config('salon.name') }}. All rights reserved.
             </p>
 
-            <a href="{{ route('admin.login') }}" class="text-xs text-ink-muted/70 transition hover:text-primary">
+            <a href="{{ route('login') }}" class="text-xs text-ink-muted/70 transition hover:text-primary">
             
             </a>
         </div>

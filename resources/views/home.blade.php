@@ -124,7 +124,7 @@
 
                                 <div class="home-promo-foot">
                                     <p class="home-promo-validity">Valid {{ $offer->validity_label }}</p>
-                                    <a href="{{ route('appointments.create') }}" class="btn-primary btn-sm shrink-0">
+                                    <a href="{{ route('home') }}#services" class="btn-primary btn-sm shrink-0">
                                         Book Now
                                     </a>
                                 </div>
@@ -143,7 +143,7 @@
     @endif
 
     {{-- ================= MOST BOOKED ================= --}}
-    <section class="home-section" aria-labelledby="home-most-booked-heading">
+    <section id="services" class="home-section scroll-mt-24" aria-labelledby="home-most-booked-heading">
         <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <div class="home-head">
                 <p class="home-eyebrow">MOST BOOKED</p>

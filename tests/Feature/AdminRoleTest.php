@@ -282,6 +282,6 @@ public function test_the_admin_role_can_delete_a_customer_record_and_nothing_els
 
         $this->actingAs($customer)
             ->get('/admin')
-            ->assertRedirect(route('admin.login'));
+            ->assertRedirect(route('login'));
     }
 }

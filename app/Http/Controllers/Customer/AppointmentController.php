@@ -428,7 +428,7 @@ class AppointmentController extends Controller
      * here; this method does the work, so the pre-fill logic has one home whether
      * it was reached through the button or a pasted URL.
      */
-    public function create(Request $request): View
+    public function create(Request $request): View|RedirectResponse
     {
         $availability = BookingAvailability::make();
         $settings = SalonSetting::current();
@@ -459,6 +459,30 @@ class AppointmentController extends Controller
             ? $this->preselectFromAppointment($previous, $services)
             : $this->preselectFromRequest($request, $services);
 
+        /*
+         * A booking needs at least one valid service, and services are now chosen
+         * on the Services page rather than inside this form. Opening `/book` by
+         * hand or with only retired/sold-out slugs therefore goes back to the
+         * catalogue instead of rendering a form whose summary can never be filled.
+         */
+        if ($selected === []) {
+            return redirect()
+                ->to(route('services.index').'#services')
+                ->with('toast', [
+                    'type' => 'warning',
+                    'message' => 'Please select at least one service before booking.',
+                ]);
+        }
+
+        /*
+         * Only the chosen services are sent to the view. The picker is gone, so
+         * the old full catalogue would be a page-sized JSON payload the summary
+         * cannot use.
+         */
+        $selectedServices = $services
+            ->map(fn ($group) => $group->filter(fn ($service) => isset($selected[$service->id])))
+            ->filter(fn ($group) => $group->isNotEmpty());
+
         // Default to the next day that actually has availability.
         $prefilledDate = $request->input('date') ?: $this->nextAvailableDate($availability);
 
@@ -488,7 +512,7 @@ class AppointmentController extends Controller
 
         return view('customer.appointments.create', [
             'settings' => $settings,
-            'groupedServices' => $services,
+            'groupedServices' => $selectedServices,
             'selected' => $selected,
             // The technicians a customer may pick. Active only: switching
             // somebody off in the panel is how "not taking bookings today" is
@@ -665,9 +689,38 @@ class AppointmentController extends Controller
     protected function preselectFromRequest(Request $request, $grouped): array
     {
         $selected = [];
-        $slugs = (array) $request->input('services', []);
+        $raw = $request->input('services', []);
+
+        if (is_string($raw)) {
+            $slugs = array_values(array_filter(array_map('trim', explode(',', $raw))));
+        } else {
+            $slugs = [];
+            foreach ((array) $raw as $item) {
+                if (is_string($item) && str_contains($item, ',')) {
+                    foreach (explode(',', $item) as $part) {
+                        $part = trim($part);
+                        if ($part !== '') {
+                            $slugs[] = $part;
+                        }
+                    }
+                } elseif (is_scalar($item)) {
+                    $slugs[] = trim((string) $item);
+                }
+            }
+        }
 
         foreach ($grouped->flatten() as $service) {
+            if ($service->isUnavailable()) {
+                continue;
+            }
+
+            $bookable = $service->base_price !== null
+                || $service->variants->contains(fn ($v) => $v->base_price !== null);
+
+            if (! $bookable) {
+                continue;
+            }
+
             if (in_array($service->slug, $slugs, true) || in_array((string) $service->id, array_map('strval', $slugs), true)) {
                 $selected[$service->id] = [
                     'service_id' => $service->id,

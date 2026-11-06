@@ -18,7 +18,7 @@
          See the note on the customer layout. --}}
     <meta name="bta-home-admin" content="{{ route('admin.dashboard') }}">
     <meta name="bta-home-web" content="{{ route('home') }}">
-    <meta name="bta-login-admin" content="{{ route('admin.login') }}">
+    <meta name="bta-login-admin" content="{{ route('login') }}">
     <meta name="bta-login-web" content="{{ route('login') }}">
 
     {{-- Where the liveness probe lives. Published rather than hardcoded in
@@ -31,15 +31,18 @@
          salon has not looked at, the plain title when there is nothing. Server-
          rendered rather than left entirely to JavaScript so the count is right
          before the bundle loads, and kept live afterwards by
-         `adminLiveNotifications` from the same poll that drives the two sidebar
-         badges — see App\Support\TabTitle.
+         `adminLiveNotifications` from the same poll that drives the Appointments
+         badge — see App\Support\TabTitle.
 
          Both this and the Appointments badge ask
          `Appointment::unseenForAdminCount()`, so they cannot report different
-         numbers for the same rows. The count is computed while the layout
-         renders, which is after the index action has marked what it showed as
-         seen — so landing on the Appointments page produces a title with no
-         prefix at all, with nothing to correct on the client. --}}
+         numbers for the same rows. Unread contact enquiries are deliberately not
+         included: the Messages row is not in the admin nav, so that number had
+         no visible surface and only left a count the admin could not account
+         for. The count is computed while the layout renders, which is after the
+         index action has marked what it showed as seen — so landing on the
+         Appointments page produces a title with no prefix at all, with nothing
+         to correct on the client. --}}
     @php
         $pageTitle = \App\Support\TabTitle::withCount(
             Str::upper(trim($__env->yieldContent('title', 'Dashboard'))).' | '.config('app.name').' Admin',
@@ -116,11 +119,17 @@
         The live work queue, with no widget of its own.
 
         This used to be the topbar's notification bell, badge and all, which meant
-        the number sat in the bar while the rows that acted on it sat in the
-        sidebar. The count is now on those rows, and all that was left of the bell
+        the number sat in the bar while the row that acted on it sat in the
+        sidebar. The count is now on that row, and all that was left of the bell
         was the polling — so that is what lives here: one component, mounted once
-        per page, that keeps the two sidebar badges and the tab title's "(n)" in
+        per page, that keeps the Appointments badge and the tab title's "(n)" in
         step from a single request.
+
+        It still receives the unread-enquiry count in the same payload, because
+        the Messages screen's own unread pill listens for `admin-messages`. That
+        count deliberately does not feed the tab title or the Appointments badge:
+        the Messages row is no longer in the admin nav, so counting it there left
+        a number with no visible notification behind it.
 
         It renders nothing, so where it is mounted does not matter visually. It
         listens on the window for `admin-read-all` and `admin-read-message` so the

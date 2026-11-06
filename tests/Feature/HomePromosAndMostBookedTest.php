@@ -158,7 +158,7 @@ class HomePromosAndMostBookedTest extends TestCase
     public function test_the_booking_row_shows_the_price_without_a_duration_or_separator(): void
     {
         ServiceCategory::create(['name' => 'Nail Care', 'color' => '#E11D48', 'sort_order' => 0]);
-        $this->makeService([
+        $service = $this->makeService([
             'name' => 'Timed Service',
             'slug' => 'timed-service',
             'category' => 'Nail Care',
@@ -167,7 +167,10 @@ class HomePromosAndMostBookedTest extends TestCase
         ]);
 
         $user = $this->makeUser();
-        $html = $this->actingAs($user)->get(route('appointments.create'))->assertOk()->getContent();
+        $html = $this->actingAs($user)
+            ->get(route('services.index'))
+            ->assertOk()
+            ->getContent();
 
         $this->assertStringContainsString('₱799', $html, 'The price is shown.');
         $this->assertStringNotContainsString('1 hr 15 min', $html, 'The duration is no longer shown on the booking row.');
@@ -180,7 +183,7 @@ class HomePromosAndMostBookedTest extends TestCase
     public function test_a_fixed_price_shows_without_a_from_prefix_or_duration(): void
     {
         ServiceCategory::create(['name' => 'Manicure & Pedicure', 'color' => '#E11D48', 'sort_order' => 0]);
-        $this->makeService([
+        $service = $this->makeService([
             'name' => 'Fixed Price Service',
             'slug' => 'fixed-price-service',
             'category' => 'Manicure & Pedicure',
@@ -189,7 +192,10 @@ class HomePromosAndMostBookedTest extends TestCase
         ]);
 
         $user = $this->makeUser();
-        $html = $this->actingAs($user)->get(route('appointments.create'))->assertOk()->getContent();
+        $html = $this->actingAs($user)
+            ->get(route('services.index'))
+            ->assertOk()
+            ->getContent();
 
         $this->assertStringContainsString('₱799', $html);
         $this->assertStringNotContainsString('>from ₱', $html);
